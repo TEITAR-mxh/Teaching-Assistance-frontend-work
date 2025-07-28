@@ -14,15 +14,7 @@ npm install
 yarn install
 ```
 
-### 2. 配置环境变量
-
-复制 `.env.example` 文件并重命名为 `.env`，然后根据需要进行配置：
-
-```env
-VITE_API_BASE_URL=http://localhost:8080
-```
-
-### 3. 启动开发服务器
+### 2. 启动开发服务器
 
 ```bash
 # 使用 npm

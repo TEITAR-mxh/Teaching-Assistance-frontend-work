@@ -53,8 +53,8 @@
       <div class="editor-panel" :class="{ 'expanded': !catalogExpanded }">
         <Markdown 
           ref="markdownEditor"
-          :initial-value="markdownContent" 
-          :height="editorHeight" 
+          v-model="markdownContent"
+          :height="editorHeight"
           preview-style="tab"
           @update:content="updateContent"
         />
@@ -79,13 +79,13 @@ import Catalog from './Catalog.vue';
 import Prompt from './Prompt.vue';
 import { getCourseMaterial, saveCourseMaterial, generateCourseMaterial } from '../api/functions';
 
-// 定义API响应类型
-interface ApiResponse<T = any> {
-  data?: T;
-  code?: number;
-  message?: string;
-  [key: string]: any;
-}
+// 定义API响应类型（已注释，未使用）
+// interface ApiResponse<T = any> {
+//   data?: T;
+//   code?: number;
+//   message?: string;
+//   [key: string]: any;
+// }
 
 // 定义讲义单元的接口
 interface LectureUnit {
@@ -233,43 +233,29 @@ const fetchCourseMaterial = async () => {
     console.error('无效的课程ID:', props.courseId);
     return;
   }
-  
   isLoading.value = true;
   loadingMessage.value = '正在加载讲义内容...';
   error.value = '';
-  
   try {
-    const response = await getCourseMaterial(props.courseId) as ApiResponse<MaterialResponse>;
-    const responseData = response?.data || {};
-    
-    if (responseData?.content) {
-      markdownContent.value = responseData.content;
-    } else if (responseData && responseData.units) {
-      // 处理新的响应格式，拼接所有单元的讲义内容
-      let combinedContent = '';
-      responseData.units.forEach((unit: LectureUnit, index: number) => {
-        if (index > 0) {
-          combinedContent += '\n\n---\n\n'; // 单元之间添加分隔线
-        }
-        combinedContent += `# 单元${unit.unit_number}: ${unit.unit_title}\n\n`;
-        combinedContent += unit.lecture_content;
-      });
-      
-      console.log('拼接后的内容长度:', combinedContent.length);
-      markdownContent.value = combinedContent;
-    } else {
-      // 如果没有内容，使用空字符串
-      markdownContent.value = '';
-      console.log('获取的讲义内容为空');
+    const response = await getCourseMaterial(props.courseId);
+    console.log('获取讲义接口返回:', response);
+    let content = '';
+    if (response?.data && typeof response.data === 'object') {
+      content = response.data.content || '';
+    } else if (response?.content) {
+      content = response.content;
     }
-    
-    // 使用ref更新Markdown组件
+    if (!content) {
+      content = '';
+      // content = '课程讲义\n\n这是课程讲义的默认内容。...';
+    }
+    markdownContent.value = content;
+    console.log('fetch后markdownContent:', markdownContent.value);
     if (markdownEditor.value && markdownEditor.value.setMarkdown) {
-      console.log('准备更新Markdown组件');
-      setTimeout(() => {
-        markdownEditor.value.setMarkdown(markdownContent.value);
-        console.log('Markdown组件已更新');
-      }, 100); // 添加短暂延时确保渲染正确
+      markdownEditor.value.setMarkdown(markdownContent.value);
+      if (markdownEditor.value.getMarkdown) {
+        console.log('fetch后编辑器内容:', markdownEditor.value.getMarkdown());
+      }
     }
   } catch (err) {
     console.error('获取课程讲义失败', err);
@@ -357,15 +343,17 @@ const handleSave = async () => {
     console.error('无效的课程ID:', props.courseId);
     return;
   }
-  
   isSaving.value = true;
   error.value = '';
-  
   try {
+    if (markdownEditor.value && markdownEditor.value.getMarkdown) {
+      markdownContent.value = markdownEditor.value.getMarkdown();
+    }
+    console.log('准备保存讲义内容:', markdownContent.value);
     await saveCourseMaterial(props.courseId, {
       content: markdownContent.value
     });
-    
+    console.log('保存讲义内容成功:', markdownContent.value);
     showSuccessMessage.value = true;
     successMessage.value = '保存成功！';
     setTimeout(() => {
@@ -382,6 +370,7 @@ const handleSave = async () => {
 onMounted(() => {
   updateEditorHeight();
   window.addEventListener('resize', updateEditorHeight);
+  console.log('TeachingLecture组件挂载，courseId:', props.courseId);
   fetchCourseMaterial(); // 加载讲义内容
 });
 

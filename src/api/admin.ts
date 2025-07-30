@@ -2,7 +2,7 @@ import axios from 'axios'
 import { setToken, setSessionToken, getAuthHeaders } from './jwt'
 
 // 基础URL配置
-const API_BASE_URL = 'http://localhost:8080'
+const API_BASE_URL = 'http://localhost:8000'
 
 // 数据类型定义
 export interface AdminLoginDTO {

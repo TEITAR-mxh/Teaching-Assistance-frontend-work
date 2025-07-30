@@ -64,6 +64,10 @@ export const getAuthHeaders = (): Record<string, string> => {
   return token ? { 'Authorization': `Bearer ${token}` } : {}
 }
 
+export function getUserId(): string {
+  return localStorage.getItem('userId') || sessionStorage.getItem('userId') || '1';
+}
+
 export default {
   getToken,
   setToken,

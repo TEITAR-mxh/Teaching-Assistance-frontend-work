@@ -188,11 +188,13 @@ const submit = async () => {
       } else {
         // 普通用户登录
         console.log('开始普通用户登录，数据:', {
+          username: username.value,
           email: loginEmail,
           password: password.value
         })
         
         const response = await authApi.login(
+          username.value,
           loginEmail,
           password.value
         )
@@ -202,11 +204,19 @@ const submit = async () => {
         if (response.success && response.data) {
           // 登录成功，令牌存储在auth.ts中已完成
           successMessage.value = '登录成功'
-          
+
           // 确保不是管理员
           localStorage.setItem('isAdmin', 'false')
           sessionStorage.setItem('isAdmin', 'false')
-          
+
+          // 【修正点】强制写入 userId/teacherId
+          if (response.data.userId) {
+            localStorage.setItem('userId', String(response.data.userId))
+            sessionStorage.setItem('userId', String(response.data.userId))
+            localStorage.setItem('teacherId', String(response.data.userId))
+            sessionStorage.setItem('teacherId', String(response.data.userId))
+          }
+
           // 清除所有本地存储的视图状态，确保进入课程管理页面
           localStorage.removeItem('showFunctionSelect');
           localStorage.removeItem('showCourseInfo');

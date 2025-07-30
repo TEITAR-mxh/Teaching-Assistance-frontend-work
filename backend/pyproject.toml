@@ -1,0 +1,27 @@
+[project]
+name = "teaching-assistance-backend"
+version = "0.1.0"
+description = "Teaching Assistance Backend based on FastAPI, SQLAlchemy, Alembic, PostgreSQL. Structure inspired by fastapi-boilerplate."
+authors = [
+    {name = "Your Name", email = "your@email.com"}
+]
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.104.1",
+    "uvicorn[standard]>=0.24.0",
+    "sqlalchemy>=2.0.23",
+    "asyncpg>=0.27.0",
+    "alembic>=1.13.0",
+    "psycopg2-binary>=2.9.9",
+    "pydantic>=2.5.0",
+    "python-dotenv>=1.0.0",
+    "email-validator>=2.1.0",
+    "PyJWT>=2.8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [] 

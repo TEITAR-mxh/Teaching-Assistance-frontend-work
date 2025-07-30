@@ -31,6 +31,8 @@
           </el-button>
           <el-divider direction="vertical" />
           <el-button text type="primary" :icon="InfoFilled">关于</el-button>
+          <el-divider direction="vertical" />
+          <!-- <el-button text type="primary" @click="goToApiTest">API测试</el-button> -->
         </div>
       </el-col>
     </el-row>
@@ -68,17 +70,28 @@ const parseJwtToken = (token: string): any => {
 // 获取并设置用户名
 const getUsernameFromToken = () => {
   try {
-    // 优先从localStorage获取token，如果没有则从sessionStorage获取
+    // 优先从localStorage获取用户名，如果没有则从sessionStorage获取
+    const storedUsername = localStorage.getItem('username') || sessionStorage.getItem('username');
+    
+    if (storedUsername) {
+      username.value = storedUsername;
+      return;
+    }
+    
+    // 如果本地存储没有用户名，尝试从token解析（作为备用方案）
     const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
     
     if (token) {
       const decoded = parseJwtToken(token);
       if (decoded && decoded.sub) {
-        username.value = decoded.sub;
+        // 这里sub是用户ID，不是用户名，所以我们需要从其他地方获取用户名
+        // 暂时使用默认值，实际应该从后端API获取用户信息
+        username.value = '教学用户';
       }
     }
   } catch (error) {
     console.error('获取用户名失败:', error);
+    username.value = '教学用户';
   }
 };
 
@@ -86,6 +99,11 @@ const getUsernameFromToken = () => {
 onMounted(() => {
   getUsernameFromToken();
 });
+
+// 跳转到API测试页面
+// const goToApiTest = () => {
+//   router.push('/api-test');
+// };
 
 // 退出登录功能
 const handleLogout = () => {
@@ -102,9 +120,13 @@ const handleLogout = () => {
   localStorage.removeItem('selectedCourseId');
   localStorage.removeItem('selectedModuleId');
   localStorage.removeItem('access_token');
+  localStorage.removeItem('username');
+  localStorage.removeItem('user_role');
   localStorage.removeItem('isAdmin');
   
   sessionStorage.removeItem('access_token');
+  sessionStorage.removeItem('username');
+  sessionStorage.removeItem('user_role');
   sessionStorage.removeItem('isAdmin');
   
   // 显示退出成功提示
@@ -121,7 +143,7 @@ const handleLogout = () => {
   }
   
   // 跳转到登录页
-  router.push('/login');
+  router.push('/auth');
 };
 </script>
 

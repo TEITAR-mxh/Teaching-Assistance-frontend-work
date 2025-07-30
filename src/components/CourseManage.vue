@@ -34,7 +34,7 @@ const fetchCourses = async () => {
     // 转换后端数据格式为组件所需格式，并按ID降序排序（ID大的排在前面）
     courses.value = data.map((course: any) => ({
       id: course.id,
-      name: course.name,
+      name: course.title, // 兼容后端title字段
       imageUrl: 'https://res.cloudinary.com/dm3rouwgn/image/upload/t_media_lib_thumb/zuxomrowewwe5spaci7w',
       isEditing: false,
       isSelected: false
@@ -59,7 +59,7 @@ const addNewCourse = async () => {
     // 添加新创建的课程到列表中
     courses.value.push({
       id: response.id,
-      name: response.name,
+      name: response.title, // 兼容后端title字段
       imageUrl: 'https://res.cloudinary.com/dm3rouwgn/image/upload/t_media_lib_thumb/zuxomrowewwe5spaci7w',
       isEditing: true, // 创建后立即进入编辑模式
       isSelected: false
@@ -84,10 +84,13 @@ const editTitle = (course: Course) => {
 
 // 完成编辑
 const finishEdit = async (course: Course) => {
+  if (!course.name || course.name.trim() === '') {
+    errorMessage.value = '课程名称不能为空';
+    return;
+  }
   try {
     // 调用更新课程名称的API
     const updatedCourse = await updateCourseName(course.id, course.name);
-    
     // 更新本地数据
     course.name = updatedCourse.name;
     course.isEditing = false;

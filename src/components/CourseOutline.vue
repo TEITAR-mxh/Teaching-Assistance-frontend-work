@@ -117,20 +117,14 @@ const editorHeight = ref('calc(100vh - 200px)');
 const fetchCourseSyllabus = async () => {
   if (!props.courseId || isNaN(props.courseId)) {
     error.value = '课程ID无效，无法获取大纲';
-    console.error('无效的课程ID:', props.courseId);
     return;
   }
-  
   isLoading.value = true;
   loadingMessage.value = '正在加载课程大纲...';
   error.value = '';
-  
   try {
-    const response = await getCourseSyllabus(props.courseId) as ApiResponse<{ content: string }>;
-    courseOutline.value = response?.data?.content || '';
-    console.log('成功获取课程大纲');
-    
-    // 使用ref直接更新Markdown组件
+    const data = await getCourseSyllabus(props.courseId);
+    courseOutline.value = data.content || '';
     if (markdownRef.value && markdownRef.value.setMarkdown) {
       markdownRef.value.setMarkdown(courseOutline.value);
     }
@@ -149,12 +143,16 @@ const saveSyllabus = async () => {
     console.error('无效的课程ID:', props.courseId);
     return;
   }
-  
   isSaving.value = true;
   try {
+    if (markdownRef.value && markdownRef.value.getMarkdown) {
+      courseOutline.value = markdownRef.value.getMarkdown();
+    }
+    console.log('准备保存大纲内容:', courseOutline.value);
     await saveCourseSyllabus(props.courseId, {
       content: courseOutline.value
     });
+    console.log('保存大纲内容成功:', courseOutline.value);
     showSuccessMessage.value = true;
     successMessage.value = '保存成功！';
     setTimeout(() => {

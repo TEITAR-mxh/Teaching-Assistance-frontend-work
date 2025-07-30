@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { getToken } from './jwt';
 
-const API_URL = 'http://localhost:8080';
+const API_URL = 'http://localhost:8000';
 
 /**
  * 获取用户ID
@@ -30,39 +30,30 @@ export const getUserId = (): string => {
  * 获取课程教学目标
  * @param courseId 课程ID
  */
-export const getCourseObjective = async (_courseId: number) => {
-  // 返回模拟数据
-  return new Promise((resolve) => {
-    // 模拟API延迟
-    setTimeout(() => {
-      resolve({
-        courseContent: '这是课程介绍，您可以根据需要修改此内容。',
-        teachingTarget: '这是教学目标，请根据课程内容进行修改。'
-      });
-    }, 300);
-  });
-  
-  /* 实际API调用代码（已注释）
+export const getCourseObjective = async (courseId: number) => {
   const token = getToken();
   const userId = getUserId();
-
   try {
     const response = await axios.get(`${API_URL}/teacher/objective/${courseId}`, {
       headers: {
         'Authorization': `Bearer ${token}`,
-        'userId': userId // 添加userId请求头
+        'userId': userId
       }
     });
     return response.data;
   } catch (error) {
-    console.error('获取课程教学目标失败，使用模拟数据', error);
-    // 返回模拟数据
-    return {
-      courseContent: '这是课程介绍，您可以根据需要修改此内容。',
-      teachingTarget: '这是教学目标，请根据课程内容进行修改。'
-    };
+    console.error('获取课程教学目标失败', error);
+    throw error;
   }
-  */
+  // mock实现：
+  // return new Promise((resolve) => {
+  //   setTimeout(() => {
+  //     resolve({
+  //       course_content: '这是课程介绍，您可以根据需要修改此内容。',
+  //       teaching_target: '这是教学目标，请根据课程内容进行修改。'
+  //     });
+  //   }, 300);
+  // });
 };
 
 /**
@@ -100,14 +91,16 @@ export const generateCourseObjective = async (courseId: number, prompt: string) 
 export const saveCourseObjective = async (courseId: number, objective: any) => {
   const token = getToken();
   const userId = getUserId();
-
   try {
     const response = await axios.post(`${API_URL}/teacher/objective/${courseId}/save`,
-      objective,
+      {
+        course_content: objective.course_content,
+        teaching_target: objective.teaching_target
+      },
       {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'userId': userId // 添加userId请求头
+          'userId': userId
         }
       }
     );
@@ -116,6 +109,12 @@ export const saveCourseObjective = async (courseId: number, objective: any) => {
     console.error('保存课程目标失败', error);
     throw error;
   }
+  // mock实现：
+  // return new Promise((resolve) => {
+  //   setTimeout(() => {
+  //     resolve({ success: true });
+  //   }, 300);
+  // });
 };
 
 /**
@@ -123,23 +122,8 @@ export const saveCourseObjective = async (courseId: number, objective: any) => {
  * @param courseId 课程ID
  */
 export const getCourseSyllabus = async (courseId: number) => {
-  // 返回模拟数据
-  return new Promise((resolve) => {
-    // 模拟网络延迟
-    setTimeout(() => {
-      resolve({
-        id: courseId,
-        title: '课程教学大纲',
-        content: '# 课程教学大纲\n\n## 一、课程基本信息\n- 课程名称：示例课程\n- 课程代码：COURSE-001\n- 学分：3\n- 学时：48\n\n## 二、课程目标\n1. 掌握基本概念和原理\n2. 理解核心知识点\n3. 能够应用所学知识解决实际问题\n\n## 三、教学内容与进度安排\n### 第一周：课程介绍\n- 课程概述\n- 学习目标\n- 考核方式\n\n### 第二周：基础知识\n- 基础概念\n- 基本原理\n\n### 第三周：核心内容\n- 重点知识讲解\n- 案例分析\n\n### 第四周：实践应用\n- 项目实践\n- 问题讨论\n\n## 四、考核方式\n- 平时成绩：30%\n- 期中考试：30%\n- 期末考试：40%\n\n## 五、参考资料\n1. 《示例教材》\n2. 相关学术论文\n3. 在线资源',
-        lastUpdated: new Date().toISOString()
-      });
-    }, 300);
-  });
-  
-  /* 实际API调用代码（已注释）
   const token = getToken();
   const userId = getUserId();
-
   try {
     const response = await axios.get(`${API_URL}/teacher/syllabus/${courseId}`, {
       headers: {
@@ -152,7 +136,17 @@ export const getCourseSyllabus = async (courseId: number) => {
     console.error('获取课程大纲失败', error);
     throw error;
   }
-  */
+  // mock实现：
+  // return new Promise((resolve) => {
+  //   setTimeout(() => {
+  //     resolve({
+  //       id: courseId,
+  //       title: '课程教学大纲',
+  //       content: '# 课程教学大纲\n\n## 一、课程基本信息\n- 课程名称：示例课程\n- 课程代码：COURSE-001\n- 学分：3\n- 学时：48\n\n## 二、课程目标\n1. 掌握基本概念和原理\n2. 理解核心知识点\n3. 能够应用所学知识解决实际问题\n\n## 三、教学内容与进度安排\n### 第一周：课程介绍\n- 课程概述\n- 学习目标\n- 考核方式\n\n### 第二周：基础知识\n- 基础概念\n- 基本原理\n\n### 第三周：核心内容\n- 重点知识讲解\n- 案例分析\n\n### 第四周：实践应用\n- 项目实践\n- 问题讨论\n\n## 四、考核方式\n- 平时成绩：30%\n- 期中考试：30%\n- 期末考试：40%\n\n## 五、参考资料\n1. 《示例教材》\n2. 相关学术论文\n3. 在线资源',
+  //       lastUpdated: new Date().toISOString()
+  //     });
+  //   }, 300);
+  // });
 };
 
 /**
@@ -211,22 +205,9 @@ export const saveCourseSyllabus = async (courseId: number, syllabus: any) => {
  * 获取课程讲义
  * @param courseId 课程ID
  */
-export const getCourseMaterial = async (_courseId: number) => {
-  // 返回模拟数据
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({
-        title: '课程讲义',
-        content: '# 课程讲义\n\n这是课程讲义的默认内容。您可以使用AI生成功能或手动编辑来完善讲义内容。\n\n## 课程目标\n- 理解核心概念\n- 掌握基本技能\n- 能够应用知识解决实际问题\n\n## 课程安排\n1. 第一周：课程介绍\n2. 第二周：基础知识讲解\n3. 第三周：进阶内容\n4. 第四周：项目实践',
-        lastUpdated: new Date().toISOString()
-      });
-    }, 300);
-  });
-  
-  /* 实际API调用代码（已注释）
+export const getCourseMaterial = async (courseId: number) => {
   const token = getToken();
   const userId = getUserId();
-
   try {
     const response = await axios.get(`${API_URL}/teacher/material/${courseId}`, {
       headers: {
@@ -239,7 +220,6 @@ export const getCourseMaterial = async (_courseId: number) => {
     console.error('获取课程讲义失败', error);
     throw error;
   }
-  */
 };
 
 /**
@@ -290,7 +270,7 @@ export const saveCourseMaterial = async (courseId: number, material: any) => {
     );
     return response.data;
   } catch (error) {
-    console.error('保存课程讲义失败', error);
+    console.error('保存教学讲义失败', error);
     throw error;
   }
 };

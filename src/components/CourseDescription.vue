@@ -139,43 +139,26 @@ const successMessage = ref('');
 
 // 获取课程目标
 const fetchCourseObjective = async () => {
-  // 检查courseId是否有效
   if (!props.courseId || props.courseId <= 0) {
     console.warn('课程ID无效，无法获取课程目标');
     return;
   }
-  
   try {
     isLoading.value = true;
     loadingMessage.value = '正在加载课程内容...';
-    
-    const response = await getCourseObjective(props.courseId) as ApiResponse<CourseObjective>;
-    const data = response?.data || {};
-    console.log('获取到的课程目标:', data);
-    
-    if (data?.courseContent) {
-      courseIntroduction.value = data.courseContent;
-      // 使用组件实例的setMarkdown方法更新内容
-      if (introductionMdRef.value?.setMarkdown) {
-        introductionMdRef.value.setMarkdown(data.courseContent);
-      }
+    const data = await getCourseObjective(props.courseId);
+    courseIntroduction.value = data.course_content || '';
+    if (introductionMdRef.value?.setMarkdown) {
+      introductionMdRef.value.setMarkdown(courseIntroduction.value);
     }
-    
-    if (data?.teachingTarget) {
-      courseContent.value = data.teachingTarget;
-      // 使用组件实例的setMarkdown方法更新内容
-      if (contentMdRef.value?.setMarkdown) {
-        contentMdRef.value.setMarkdown(data.teachingTarget);
-      }
+    courseContent.value = data.teaching_target || '';
+    if (contentMdRef.value?.setMarkdown) {
+      contentMdRef.value.setMarkdown(courseContent.value);
     }
-    
   } catch (error) {
     console.error('获取课程目标失败:', error);
-    // 如果获取失败，使用默认值
     courseIntroduction.value = '暂无课程介绍，请添加或使用AI生成';
     courseContent.value = '暂无教学目标，请添加或使用AI生成';
-    
-    // 更新Markdown组件
     if (introductionMdRef.value && introductionMdRef.value.setMarkdown) {
       introductionMdRef.value.setMarkdown('暂无课程介绍，请添加或使用AI生成');
     }
@@ -271,44 +254,32 @@ const handleSave = async () => {
     alert('课程ID无效，无法保存');
     return;
   }
-  
   try {
     isSaving.value = true;
-    
-    // 从Markdown组件获取最新内容
     if (introductionMdRef.value) {
       const introContent = introductionMdRef.value.getMarkdown ? 
         introductionMdRef.value.getMarkdown() : courseIntroduction.value;
       courseIntroduction.value = introContent;
     }
-    
     if (contentMdRef.value) {
       const teachingContent = contentMdRef.value.getMarkdown ? 
         contentMdRef.value.getMarkdown() : courseContent.value;
       courseContent.value = teachingContent;
     }
-    
     const objectiveData = {
-      courseContent: courseIntroduction.value,
-      teachingTarget: courseContent.value
+      course_content: courseIntroduction.value,
+      teaching_target: courseContent.value
     };
-    
-    console.log('保存课程目标:', objectiveData);
     await saveCourseObjective(props.courseId, objectiveData);
-    
-    // 显示成功消息
     successMessage.value = '保存成功';
     showSuccessMessage.value = true;
     setTimeout(() => {
       showSuccessMessage.value = false;
     }, 3000);
-    
-    // 保存成功后重新获取数据
     await fetchCourseObjective();
-    
   } catch (error) {
     console.error('保存失败:', error);
-    successMessage.value = '保存失败，请重试';
+    successMessage.value = '保存失败，请稍后重试';
     showSuccessMessage.value = true;
     setTimeout(() => {
       showSuccessMessage.value = false;
@@ -525,4 +496,3 @@ body {
   scrollbar-width: none;  /* Firefox */
 }
 </style>
-

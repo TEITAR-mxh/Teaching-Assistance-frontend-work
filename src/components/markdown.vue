@@ -6,7 +6,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, defineProps, defineEmits } from 'vue';
+import { ref, onMounted, onBeforeUnmount, defineProps, defineEmits, watch } from 'vue';
 import '@toast-ui/editor/dist/toastui-editor.css';
 // @ts-ignore
 import Editor from '@toast-ui/editor';
@@ -24,7 +24,7 @@ declare global {
 }
 
 const props = defineProps({
-  initialValue: {
+  modelValue: {
     type: String,
     default: ''
   },
@@ -42,7 +42,7 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['update:content', 'change']);
+const emit = defineEmits(['update:modelValue', 'change']);
 
 const editorEl = ref<HTMLElement | null>(null);
 let editor: any = null;
@@ -238,12 +238,12 @@ onMounted(() => {
     editor = new Editor({
       el: editorEl.value,
       height: props.height,
-      initialValue: props.initialValue,
+      initialValue: props.modelValue, // 用 v-model 变量初始化
       previewStyle: props.previewStyle,
       placeholder: props.placeholder,
-      language: 'zh-CN', // 设置语言为中文
-      hideModeSwitch: true, // 隐藏Markdown和所见即所得切换按钮
-      initialEditType: 'markdown', // 始终使用Markdown模式
+      language: 'zh-CN',
+      hideModeSwitch: true,
+      initialEditType: 'markdown',
       plugins: [createMathPlugin(), uml],
       toolbarItems: [
         ['heading', 'bold', 'italic', 'strike'],
@@ -255,7 +255,7 @@ onMounted(() => {
         change: () => {
           if (editor) {
             const content = editor.getMarkdown();
-            emit('update:content', content);
+            emit('update:modelValue', content);
             emit('change', content);
           }
         },
@@ -303,6 +303,13 @@ onMounted(() => {
 
     // 初次加载也处理一次
     handlePreviewChange();
+  }
+});
+
+// 监听 v-model 变量变化，自动 setMarkdown
+watch(() => props.modelValue, (newVal) => {
+  if (editor && editor.getMarkdown() !== newVal) {
+    setMarkdown(newVal || '');
   }
 });
 

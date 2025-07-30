@@ -34,6 +34,7 @@ export interface AvailabilityResponse {
 
 // 登录请求类型
 export interface LoginRequest {
+  username: string;
   email: string;
   password: string;
 }
@@ -48,50 +49,75 @@ export interface LoginResponse {
 
 /**
  * 用户登录
+ * @param username 用户名
  * @param email 用户邮箱
  * @param password 密码
  * @returns 登录结果
  */
 export const login = async (
+  username: string,
   email: string,
   password: string
 ): Promise<{ success: boolean; data?: LoginResponse; message?: string }> => {
-  // 查找匹配的用户
-  const user = mockUsers.find(u => u.email === email && u.password === password);
-  
-  if (user) {
-    // 登录成功，生成token
-    const token = generateToken(user.id);
-    
-    // 存储token和用户信息
-    localStorage.setItem('access_token', token);
-    sessionStorage.setItem('access_token', token);
-    
-    // 保存用户角色到sessionStorage
-    if (user.role) {
-      sessionStorage.setItem('user_role', user.role);
-    }
-    
-    // 如果是管理员，设置标志
-    if (user.role === 'admin') {
-      sessionStorage.setItem('isAdmin', 'true');
-      localStorage.setItem('isAdmin', 'true');
-    }
-    
-    return {
-      success: true,
-      data: {
-        token,
-        userId: user.id,
-        username: user.username,
-        role: user.role
+  try {
+    const response = await fetch('http://localhost:8000/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        username: username,
+        email: email,
+        password: password
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      
+      // 存储token和用户信息
+      localStorage.setItem('access_token', data.token);
+      sessionStorage.setItem('access_token', data.token);
+      
+      // 保存用户名
+      if (data.username) {
+        localStorage.setItem('username', data.username);
+        sessionStorage.setItem('username', data.username);
       }
-    };
-  } else {
-    // 登录失败
+      
+      // 保存用户角色到sessionStorage
+      if (data.role) {
+        sessionStorage.setItem('user_role', data.role);
+        localStorage.setItem('user_role', data.role);
+      }
+      
+      // 如果是管理员，设置标志
+      if (data.role === 'admin') {
+        sessionStorage.setItem('isAdmin', 'true');
+        localStorage.setItem('isAdmin', 'true');
+      }
+      
+      return {
+        success: true,
+        data: {
+          token: data.token,
+          userId: data.userId,
+          username: data.username,
+          role: data.role
+        }
+      };
+    } else {
+      const errorData = await response.json();
+      return {
+        success: false,
+        message: errorData.detail || '登录失败，请检查您的邮箱和密码'
+      };
+    }
+  } catch (error) {
+    console.error('登录请求失败:', error);
     return {
       success: false,
-      message: '登录失败，请检查您的邮箱和密码'
+      message: '网络错误，请检查后端服务是否正常运行'
     };
   }
 }
@@ -99,30 +125,51 @@ export const login = async (
 /**
  * 用户注册
  * @param username 用户名
- * @param _password 密码 (未使用)
- * @param _email 邮箱 (未使用)
- * @param _role 角色 (未使用)
+ * @param password 密码
+ * @param email 邮箱
+ * @param role 角色
  * @returns 注册结果
  */
 export const register = async (
   username: string,
-  _password: string,
-  _email: string,
-  _role: string = 'teacher'
+  password: string,
+  email: string,
+  role: string = 'teacher'
 ): Promise<RegisterResponse> => {
-  // 检查用户名是否已存在
-  if (mockUsers.some(u => u.username === username)) {
+  try {
+    const response = await fetch('http://localhost:8000/auth/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        username: username,
+        email: email,
+        password: password,
+        role: role
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return {
+        success: true,
+        message: data.message || '注册成功'
+      };
+    } else {
+      const errorData = await response.json();
+      return {
+        success: false,
+        message: errorData.detail || '注册失败'
+      };
+    }
+  } catch (error) {
+    console.error('注册请求失败:', error);
     return {
       success: false,
-      message: '该用户名已被使用'
+      message: '网络错误，请检查后端服务是否正常运行'
     };
   }
-  
-  // 在mock中，只返回成功响应
-  return {
-    success: true,
-    message: '注册成功'
-  };
 }
 
 /**
@@ -153,6 +200,8 @@ const removeToken = (): void => {
   sessionStorage.removeItem('isAdmin');
   localStorage.removeItem('user_role');
   sessionStorage.removeItem('user_role');
+  localStorage.removeItem('username');
+  sessionStorage.removeItem('username');
 };
 
 /**

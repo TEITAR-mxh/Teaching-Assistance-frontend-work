@@ -110,14 +110,15 @@ const checkLoginStatus = () => {
   if (!isLoggedIn.value) {
     // 如果未登录，跳转到登录页
     console.log('[Home] 未登录，跳转到登录页')
-    router.push('/login')
+    router.push('/auth')
   } else if (isAdmin) {
     // 如果是管理员，跳转到管理页
     console.log('[Home] 管理员用户，跳转到管理页')
     router.push('/admin')
   } else {
-    // 显示默认用户名
-    username.value = authApi.currentUser.value || '教学用户'
+    // 从本地存储获取用户名
+    const storedUsername = localStorage.getItem('username') || sessionStorage.getItem('username')
+    username.value = storedUsername || '教学用户'
     
     // 确保userId被正确存储
     const userId = sessionStorage.getItem('userId') || localStorage.getItem('userId')

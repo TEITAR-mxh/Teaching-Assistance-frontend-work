@@ -21,11 +21,17 @@ cd Teaching-Assistance-demo
 
 ### 2. 后端设置
 
-#### 2.1 安装 Python 依赖
+#### 2.1 安装 uv 并创建虚拟环境
 
 ```bash
+# 安装 uv (如果还没有安装)
+pip install uv
+
+# 进入后端目录
 cd backend
-pip install -r requirements.txt
+
+# 使用 uv 创建虚拟环境并安装依赖
+uv sync
 ```
 
 #### 2.2 配置数据库
@@ -55,14 +61,14 @@ pip install -r requirements.txt
 
 ```bash
 cd backend
-alembic upgrade head
+uv run alembic upgrade head
 ```
 
 #### 2.4 启动后端服务
 
 ```bash
 cd backend
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 后端服务将在 [http://localhost:8000](http://localhost:8000) 上启动。
@@ -160,10 +166,10 @@ nano backend/.env
 ```bash
 cd backend
 # 创建新迁移
-alembic revision --autogenerate -m "描述"
+uv run alembic revision --autogenerate -m "描述"
 
 # 应用迁移
-alembic upgrade head
+uv run alembic upgrade head
 ```
 
 ### 测试
@@ -171,7 +177,7 @@ alembic upgrade head
 ```bash
 # 后端测试
 cd backend
-pytest
+uv run pytest
 
 # 前端测试
 npm run test

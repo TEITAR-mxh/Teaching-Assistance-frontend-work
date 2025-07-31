@@ -1,15 +1,14 @@
 <template>
   <div class="course-description-container">
-    <div class="header">
+    <div class="header-container">
       <button class="back-button" @click="$emit('back')">←</button>
-      <h3 class="section-title">课程大纲</h3>
+      <h1 class="title">课程大纲</h1>
       <div class="header-right">
-        <button class="ai-btn" @click="openPrompt" :disabled="isGenerating || isLoading || isSaving">
+        <button class="ai-btn" @click="openPrompt()">
           <span class="ai-icon">✨</span>
           AI生成
         </button>
-        <!-- <button class="btn btn-secondary">暂存</button> -->
-        <button class="btn btn-primary" @click="saveSyllabus" :disabled="isGenerating || isLoading || isSaving">保存</button>
+        <button class="save-btn" @click="saveSyllabus" :disabled="isSaving">保存</button>
       </div>
     </div>
 
@@ -38,24 +37,30 @@
       <span>{{ error }}</span>
     </div>
 
-    <div class="section">
+    <div class="section editor-wrapper">
       <Markdown 
         ref="markdownRef"
         v-model="courseOutline"
         :initial-value="courseOutline" 
         :height="editorHeight" 
         preview-style="tab"
-        :editable="true" 
+        :editable="true"
+        placeholder="开始编写课程大纲..."
       />
+      <button v-if="showOptimizeButton" class="ai-optimize-btn" :style="optimizeButtonPosition" @click="openAIOptimize">
+        ✨ AI优化
+      </button>
     </div>
-    
-    <Prompt
+
+    <AiPromptDialog
       :is-visible="showPrompt"
-      title="AI生成课程大纲"
-      description="请输入您想要生成的课程大纲的相关描述或关键词"
-      placeholder="例如：计算机网络基础、面向对象程序设计、人工智能导论等"
-      @close="showPrompt = false"
-      @confirm="handlePromptConfirm"
+      :reference-content="selectedText"
+      :ai-content="aiGeneratedContent"
+      :is-generating="isGenerating"
+      @close="handleCloseDialog"
+      @replace="handleReplace"
+      @insert="handleInsert"
+      @generate="handleGenerateSyllabus"
     />
   </div>
 </template>
@@ -63,16 +68,8 @@
 <script setup lang="ts">
 import { ref, defineEmits, onMounted, onUnmounted, defineProps } from 'vue';
 import Markdown from './markdown.vue';
-import Prompt from './Prompt.vue';
+import AiPromptDialog from './AiPromptDialog.vue';
 import { getCourseSyllabus, saveCourseSyllabus, generateCourseSyllabus } from '../api/functions';
-
-// 定义API响应类型
-interface ApiResponse<T = any> {
-  data?: T;
-  code?: number;
-  message?: string;
-  [key: string]: any;
-}
 
 // 定义Markdown组件实例的类型
 interface MarkdownInstance {
@@ -96,6 +93,10 @@ const markdownRef = ref<MarkdownInstance | null>(null);
 
 // 控制Prompt组件显示
 const showPrompt = ref(false);
+const selectedText = ref('');
+const showOptimizeButton = ref(false);
+const optimizeButtonPosition = ref({ top: '0px', left: '0px' });
+const aiGeneratedContent = ref('');
 
 // 课程大纲内容
 const courseOutline = ref('');
@@ -173,101 +174,107 @@ const updateEditorHeight = () => {
 };
 
 // 处理Prompt提交事件
-const handlePromptConfirm = async (content: string) => {
+const handleReplace = (content: string) => {
+  // Placeholder for replace logic. This will be implemented fully later.
+  if (markdownRef.value && markdownRef.value.setMarkdown) {
+      markdownRef.value.setMarkdown(content);
+  }
+};
+
+const handleInsert = (content: string) => {
+  // Placeholder for insert logic.
+  if (markdownRef.value && markdownRef.value.insertText) {
+      markdownRef.value.insertText(content);
+  } else {
+    courseOutline.value += `\n${content}`;
+  }
+};
+
+const handleCloseDialog = () => {
+  showPrompt.value = false;
+  aiGeneratedContent.value = ''; // Reset on close
+};
+
+const handleGenerateSyllabus = async (requirements: string) => {
   if (!props.courseId || isNaN(props.courseId)) {
     alert('课程ID无效，无法生成大纲');
-    console.error('无效的课程ID:', props.courseId);
-    showPrompt.value = false;
     return;
   }
-  
-  console.log('用户提交的大纲生成内容:', content);
-  if (!content.trim()) {
-    alert('请输入有效的描述内容');
-    return;
-  }
-  
-  showPrompt.value = false;
+
   isGenerating.value = true;
-  generatingStatus.value = '正在生成课程大纲...';
+  generatingStatus.value = '正在生成中...';
+  aiGeneratedContent.value = '正在生成中，请稍候...';
   error.value = '';
-  
-  // 打印请求信息，确认userId
-  const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId') || '未获取到userId';
-  console.log('生成大纲请求信息:', {
-    courseId: props.courseId,
-    userId: userId,
-    contentLength: content.length
-  });
-  
+
   try {
-    const response = await generateCourseSyllabus(props.courseId, content) as 
-      { content?: string } | 
-      { choices?: Array<{ message?: { content: string } }> };
-    console.log('收到API响应:', response);
-    
-    // 处理新的响应格式 (OpenAI 格式)
-    if ('choices' in response && response.choices?.[0]?.message) {
-      // 从新的响应格式中提取content
-      courseOutline.value = response.choices[0].message?.content || '';
-      console.log('成功生成教学大纲 (OpenAI 格式)');
-      
-      // 使用ref直接更新Markdown组件
-      if (markdownRef.value?.setMarkdown) {
-        markdownRef.value.setMarkdown(courseOutline.value);
-      }
-      
-      showSuccessMessage.value = true;
-      successMessage.value = '生成成功！';
-      setTimeout(() => {
-        showSuccessMessage.value = false;
-      }, 3000);
-    } 
-    // 处理旧的响应格式
-    else if ('content' in response && response.content) {
-      // 兼容原有响应格式
-      courseOutline.value = response.content;
-      console.log('成功生成教学大纲');
-      
-      // 使用ref直接更新Markdown组件
-      if (markdownRef.value && markdownRef.value.setMarkdown) {
-        markdownRef.value.setMarkdown(courseOutline.value);
-      }
-      
-      showSuccessMessage.value = true;
-      successMessage.value = '生成成功！';
-      setTimeout(() => {
-        showSuccessMessage.value = false;
-      }, 3000);
+    const response = await generateCourseSyllabus(props.courseId, requirements);
+    if (response && response.data && typeof response.data.content === 'string') {
+      aiGeneratedContent.value = response.data.content;
     } else {
-      error.value = '生成的大纲内容为空，请尝试提供更详细的描述';
-      console.error('生成的大纲内容为空', response);
+      throw new Error('API返回的数据格式不正确或内容为空');
     }
   } catch (err) {
-    console.error('生成课程大纲失败', err);
-    error.value = '生成课程大纲失败，请稍后重试';
+    console.error('生成课程教学大纲失败', err);
+    error.value = '生成课程大纲失败，请检查输入或稍后重试';
+    aiGeneratedContent.value = '生成失败，请重试。';
   } finally {
     isGenerating.value = false;
+    generatingStatus.value = '生成完成';
   }
 };
 
 // 打开Prompt对话框
-const openPrompt = () => {
+const openPrompt = (text: string = '') => {
   if (isGenerating.value || isLoading.value || isSaving.value) {
     return;
   }
-  console.log('打开AI生成对话框');
+  selectedText.value = text;
+  aiGeneratedContent.value = '未生成'; // Reset content when opening
   showPrompt.value = true;
+};
+
+const handleSelectionChange = () => {
+  const selection = window.getSelection();
+  if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    const editorEl = (markdownRef.value?.$el as HTMLElement)?.querySelector('.editor-wrapper') || (markdownRef.value?.$el as HTMLElement);
+    if (!editorEl) return;
+
+    const editorRect = editorEl.getBoundingClientRect();
+
+    // Check if the selection is inside the editor
+    if (rect.top >= editorRect.top && rect.bottom <= editorRect.bottom) {
+      selectedText.value = selection.toString().trim();
+      if (selectedText.value.length > 0) {
+        showOptimizeButton.value = true;
+        optimizeButtonPosition.value = {
+          top: `${rect.bottom - editorRect.top + 10}px`, // Position 10px below selection
+          left: `${rect.left - editorRect.left + rect.width / 2}px`,
+        };
+      }
+    } else {
+      showOptimizeButton.value = false;
+    }
+  } else {
+    showOptimizeButton.value = false;
+  }
+};
+
+const openAIOptimize = () => {
+  openPrompt(selectedText.value);
 };
 
 onMounted(() => {
   updateEditorHeight();
   window.addEventListener('resize', updateEditorHeight);
   fetchCourseSyllabus();
+  document.addEventListener('selectionchange', handleSelectionChange);
 });
 
 onUnmounted(() => {
   window.removeEventListener('resize', updateEditorHeight);
+  document.removeEventListener('selectionchange', handleSelectionChange);
 });
 </script>
 
@@ -282,11 +289,12 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-.header {
+.header-container {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  padding: 1rem;
+  position: relative;
 }
 
 .header-right {
@@ -312,6 +320,71 @@ onUnmounted(() => {
 
 .back-button:hover {
   background-color: rgba(33, 150, 243, 0.1);
+}
+
+.title {
+  font-size: 24px; /* 统一字号 */
+  font-weight: bold; /* 统一字重 */
+  color: #333;
+  text-align: center;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  user-select: none; /* 禁止选中 */
+}
+
+.ai-btn {
+  display: flex;
+  align-items: center;
+  background-color: rgba(76, 175, 80, 0.7);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s;
+}
+
+.ai-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ai-btn:hover:not(:disabled) {
+  background-color: rgba(76, 175, 80, 0.85);
+}
+
+.ai-icon {
+  margin-right: 8px;
+}
+
+.save-btn {
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  background-color: rgba(76, 175, 80, 0.7);
+  color: white;
+}
+
+.save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.save-btn:hover:not(:disabled) {
+  background-color: rgba(76, 175, 80, 0.85);
 }
 
 .loading {
@@ -390,83 +463,28 @@ onUnmounted(() => {
   to { transform: rotate(360deg); }
 }
 
-
-.btn {
-  padding: 10px 20px;
-  border-radius: 4px;
-  border: none;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.3s;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+.editor-wrapper {
+  position: relative;
 }
 
-.btn-primary {
-  background-color: rgba(76, 175, 80, 0.7);
-  color: white;
-}
-
-.btn-primary:hover {
-  background-color: rgba(76, 175, 80, 0.85);
-}
-
-.btn-secondary {
-  background-color: rgba(245, 245, 245, 0.7);
-  color: #333;
-}
-
-.btn-secondary:hover {
-  background-color: rgba(245, 245, 245, 0.85);
-}
-
-.btn:hover {
-  opacity: 0.9;
-}
-
-.ai-btn {
-  display: flex;
-  align-items: center;
-  background-color: rgba(76, 175, 80, 0.7);
+.ai-optimize-btn {
+  position: absolute;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  background-color: #6366f1;
   color: white;
   border: none;
-  border-radius: 4px;
-  padding: 8px 16px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 14px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+  transition: all 0.2s ease;
 }
 
-.ai-btn:hover {
-  background-color: rgba(76, 175, 80, 0.85);
-}
-
-.ai-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.ai-icon {
-  margin-right: 8px;
-}
-
-.section {
-  margin-bottom: 30px;
-}
-
-.section-title {
-  font-size: 24px;
-  font-weight: 500;
-  color: #333;
-  margin-bottom: 10px;
-  text-align: center;
-  flex-grow: 1;
+.ai-optimize-btn:hover {
+  background-color: #4f46e5;
+  transform: translateX(-50%) translateY(-2px);
 }
 </style>
 

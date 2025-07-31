@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
 import { getCourseDetail, updateCourseName } from '../api/courseManger'
+import moment from 'moment' // Import moment
 
 // 定义API响应类型
 interface ApiResponse<T = any> {
@@ -32,6 +33,7 @@ const emit = defineEmits(['back', 'show-course-info', 'show-module', 'update:cou
 // 课程标题
 const courseTitle = ref(props.courseTitle || '课程标题')
 const isEditingTitle = ref(false)
+const courseTitleLastModified = ref(moment().toISOString()); // Track last modified for title
 
 // 监听props变化更新标题
 watch(() => props.courseTitle, (newTitle) => {
@@ -49,14 +51,17 @@ interface ModuleConfig {
   title: string
   icon: string
   status: ModuleStatus
+  lastModifiedDate: string; // Add last modified date
 }
 
-// 四个模块的状态
+// 6个模块的状态
 const modules = ref<ModuleConfig[]>([
-  { id: 'basic', title: '课程介绍', icon: 'info', status: 'empty' },
-  { id: 'outline', title: '课程大纲', icon: 'list', status: 'empty' },
-  { id: 'lecture', title: '教学讲义', icon: 'book', status: 'empty' },
-  { id: 'courseware', title: '教学课件', icon: 'presentation', status: 'empty' }
+  { id: 'basic', title: '课程介绍', icon: 'info-circle', status: 'empty', lastModifiedDate: moment().toISOString() },
+  { id: 'outline', title: '课程大纲', icon: 'list-alt', status: 'empty', lastModifiedDate: moment().toISOString() },
+  { id: 'lecture', title: '教学讲义', icon: 'book', status: 'empty', lastModifiedDate: moment().toISOString() },
+  { id: 'courseware', title: '教学课件', icon: 'file-powerpoint', status: 'empty', lastModifiedDate: moment().toISOString() },
+  { id: 'knowledge', title: '知识梳理', icon: 'sitemap', status: 'empty', lastModifiedDate: moment().toISOString() }, // New module
+  { id: 'test', title: '学习进展测试', icon: 'clipboard-check', status: 'empty', lastModifiedDate: moment().toISOString() } // New module
 ])
 
 // 加载课程详情并更新模块状态
@@ -71,23 +76,25 @@ const loadCourseDetail = async () => {
     if (courseDetail) {
       // 课程介绍
       if (courseDetail.introduction && courseDetail.introduction.trim() !== '') {
-        updateModuleStatus('basic', 'completed')
+        updateModuleStatus('basic', 'completed', true)
       }
       
       // 课程大纲
       if (courseDetail.outline && courseDetail.outline.length > 0) {
-        updateModuleStatus('outline', 'completed')
+        updateModuleStatus('outline', 'completed', true)
       }
       
       // 教学讲义
       if (courseDetail.lectures && courseDetail.lectures.length > 0) {
-        updateModuleStatus('lecture', 'completed')
+        updateModuleStatus('lecture', 'completed', true)
       }
       
       // 教学课件
       if (courseDetail.courseware && courseDetail.courseware.length > 0) {
-        updateModuleStatus('courseware', 'completed')
+        updateModuleStatus('courseware', 'completed', true)
       }
+      
+      checkAndApplyWarningStatus();
     }
   } catch (error) {
     console.error('获取课程详情失败:', error)
@@ -95,12 +102,43 @@ const loadCourseDetail = async () => {
 }
 
 // 更新模块状态
-const updateModuleStatus = (moduleId: string, status: ModuleStatus) => {
+const updateModuleStatus = (moduleId: string, status: ModuleStatus, fromLoad = false) => {
   const moduleIndex = modules.value.findIndex(m => m.id === moduleId)
   if (moduleIndex !== -1) {
-    modules.value[moduleIndex].status = status
+    modules.value[moduleIndex].status = status;
+    if (status === 'pending' || status === 'completed') {
+      modules.value[moduleIndex].lastModifiedDate = moment().toISOString();
+    }
+    if (!fromLoad) { // Only check warnings if not from initial load
+      checkAndApplyWarningStatus();
+    }
   }
 }
+
+// 检查并应用警告状态
+const checkAndApplyWarningStatus = () => {
+  const currentModules = modules.value;
+  for (let i = 0; i < currentModules.length; i++) {
+    const currentModule = currentModules[i];
+    
+    // Only apply warning to modules that are not empty
+    if (currentModule.status === 'pending' || currentModule.status === 'completed') {
+      let upstreamModifiedDate = courseTitleLastModified.value; // Start with course title modification date
+
+      // Check previous modules in the sequence
+      for (let j = 0; j < i; j++) {
+        const prevModule = currentModules[j];
+        if (moment(prevModule.lastModifiedDate).isAfter(moment(upstreamModifiedDate))) {
+          upstreamModifiedDate = prevModule.lastModifiedDate; // Update with the latest upstream modification
+        }
+      }
+
+      if (moment(upstreamModifiedDate).isAfter(moment(currentModule.lastModifiedDate))) {
+        currentModule.status = 'warning';
+      } 
+    }
+  }
+};
 
 // 监听courseId变化，重新加载课程详情
 watch(() => props.courseId, (newId) => {
@@ -111,7 +149,8 @@ watch(() => props.courseId, (newId) => {
 
 // 组件挂载时加载课程详情
 onMounted(() => {
-  loadCourseDetail()
+  loadCourseDetail();
+  courseTitleLastModified.value = moment().toISOString(); 
 })
 
 // 切换标题编辑状态
@@ -124,6 +163,12 @@ const toggleTitleEdit = async () => {
         // 调用API更新课程名称
         const result = await updateCourseName(props.courseId, courseTitle.value)
         console.log('课程名称更新成功:', result)
+        
+        // Update courseTitleLastModified after successful save
+        courseTitleLastModified.value = moment().toISOString();
+        
+        // After updating title, re-check warning statuses for all modules
+        checkAndApplyWarningStatus();
         
         // 通知父组件更新课程名称
         emit('update:courseTitle', courseTitle.value)
@@ -148,63 +193,46 @@ const goBack = () => {
 }
 
 // 显示课程信息
-// const showCourseInfo = () => {
-//   emit('show-course-info')
-// }
+const showCourseInfo = () => {
+  emit('show-course-info')
+}
 
 // 显示模块内容
 const showModule = (moduleId: string) => {
-  emit('show-module', moduleId)
+  if (moduleId === 'lecture') {
+    // 导航到TeachingLecture组件并设置showEditor为true
+    emit('show-module', { 
+      component: 'TeachingLecture', 
+      props: {
+        courseId: props.courseId,
+        courseName: courseTitle.value,
+        showEditor: true  // 添加showEditor参数
+      }
+    });
+  } else {
+    emit('show-module', moduleId);
+  }
 }
 
-// 获取状态图标
+// 获取状态图标 (FontAwesome)
 const getStatusIcon = (status: ModuleStatus) => {
   switch (status) {
     case 'empty':
-      return '○' // 空心圆图标
+      return ['fas', 'circle'] // 空心圆图标
     case 'pending':
-      return '⏱' // 时钟图标
+      return ['fas', 'clock'] // 时钟图标
     case 'completed':
-      return '✓' // 对勾图标
+      return ['fas', 'check-circle'] // 对勾图标
     case 'warning':
-      return '⚠' // 警告三角形图标
+      return ['fas', 'exclamation-triangle'] // 警告三角形图标
     default:
-      return '○'
+      return ['fas', 'circle']
   }
 }
 
-// 获取模块图标SVG
+// 获取模块图标 (FontAwesome)
 const getModuleIcon = (iconName: string) => {
-  switch (iconName) {
-    case 'info':
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="12" y1="16" x2="12" y2="12"></line>
-                <line x1="12" y1="8" x2="12.01" y2="8"></line>
-              </svg>`
-    case 'list':
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="8" y1="6" x2="21" y2="6"></line>
-                <line x1="8" y1="12" x2="21" y2="12"></line>
-                <line x1="8" y1="18" x2="21" y2="18"></line>
-                <line x1="3" y1="6" x2="3.01" y2="6"></line>
-                <line x1="3" y1="12" x2="3.01" y2="12"></line>
-                <line x1="3" y1="18" x2="3.01" y2="18"></line>
-              </svg>`
-    case 'book':
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
-              </svg>`
-    case 'presentation':
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-                <line x1="8" y1="21" x2="16" y2="21"></line>
-                <line x1="12" y1="17" x2="12" y2="21"></line>
-              </svg>`
-    default:
-      return ''
-  }
+  return ['fas', iconName];
 }
 </script>
 
@@ -213,20 +241,24 @@ const getModuleIcon = (iconName: string) => {
     <!-- 课程标题 -->
     <div class="title-container">
       <button class="back-button" @click="goBack">←</button>
-      <div v-if="isEditingTitle" class="editing-title">
-        <input
-          v-model="courseTitle"
-          type="text"
-          class="title-input"
-          @keyup.enter="toggleTitleEdit"
-        />
+      
+      
+      <div class="title-center-group">
+        <h1 v-if="!isEditingTitle" class="course-title">{{ courseTitle }}</h1>
+        <div v-else class="editing-title">
+          <input
+            v-model="courseTitle"
+            type="text"
+            class="title-input"
+            @keyup.enter="toggleTitleEdit"
+          />
+        </div>
+        <button class="edit-button" @click="toggleTitleEdit">
+          {{ isEditingTitle ? '保存' : '修改' }}
+        </button>
       </div>
-      <h1 v-else class="course-title">{{ courseTitle }}</h1>
-      <button class="edit-button" @click="toggleTitleEdit">
-        {{ isEditingTitle ? '保存' : '修改' }}
-      </button>
-      <!-- 临时隐藏课程信息按钮 -->
-      <!-- <button class="course-info-button" @click="showCourseInfo">课程信息</button> -->
+      <button class="course-info-button" @click="showCourseInfo">课程信息</button>
+      <!-- <font-awesome-icon :icon="['fas', 'user-circle']" class="user-avatar-icon" /> -->
     </div>
 
     <!-- 模块列表 -->
@@ -235,17 +267,23 @@ const getModuleIcon = (iconName: string) => {
         <!-- 模块 -->
         <div class="module-card" @click="showModule(module.id)">
           <div class="status-icon" :class="`status-${module.status}`">
-            {{ getStatusIcon(module.status) }}
+            <font-awesome-icon :icon="getStatusIcon(module.status)" />
           </div>
           <div class="module-icon">
-            <div class="icon-circle" v-html="getModuleIcon(module.icon)">
+            <div class="icon-circle">
+              <font-awesome-icon :icon="getModuleIcon(module.icon)" />
             </div>
           </div>
           <div class="module-title">{{ module.title }}</div>
         </div>
 
-        <!-- 箭头 (除了最后一个模块) -->
-        <div v-if="index < modules.length - 1" class="arrow">→</div>
+        <!-- 箭头  -->
+        <div
+          v-if="index < modules.length - 1 && index !== 2"
+          :class="['arrow']"
+        >
+          <font-awesome-icon :icon="['fas', 'arrow-right']" />
+        </div>
       </template>
     </div>
   </div>
@@ -320,11 +358,22 @@ const getModuleIcon = (iconName: string) => {
   box-shadow: 0 4px 15px rgba(33, 150, 243, 0.2);
 }
 
-/* 临时隐藏课程信息按钮样式
+.title-center-group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-grow: 1; 
+  margin: 0 120px; 
+}
+
+.edit-button {
+  margin-left: 20px;
+}
+
 .course-info-button {
-  padding: 8px 16px;
-  background-color: rgba(244, 67, 54, 0.2);
-  color: rgba(244, 67, 54, 0.9);
+  padding: 5px 15px;
+  background-color: rgba(33, 150, 243, 0.2);
+  color: rgba(33, 150, 243, 0.9);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 8px;
   cursor: pointer;
@@ -333,19 +382,27 @@ const getModuleIcon = (iconName: string) => {
   transition: all 0.3s ease;
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 4px 12px rgba(244, 67, 54, 0.2);
+  box-shadow: 0 4px 12px rgba(33, 150, 243, 0.2);
   position: absolute;
-  right: 0;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .course-info-button:hover {
-  background-color: rgba(244, 67, 54, 0.3);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(244, 67, 54, 0.3);
+  background-color: rgba(33, 150, 243, 0.3);
+  transform: translateY(-50%);
+  box-shadow: 0 8px 20px rgba(89, 178, 250, 0.3);
 }
-*/
+
+.edit-button:hover {
+  background-color: rgba(33, 150, 243, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(89, 178, 250, 0.3);
+}
 
 .edit-button {
+  
   padding: 5px 15px;
   background-color: rgba(33, 150, 243, 0.2);
   color: rgba(33, 150, 243, 0.9);
@@ -360,79 +417,80 @@ const getModuleIcon = (iconName: string) => {
   box-shadow: 0 4px 12px rgba(33, 150, 243, 0.2);
 }
 
-.edit-button:hover {
-  background-color: rgba(33, 150, 243, 0.3);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(89, 178, 250, 0.3);
-}
-
 .modules-container {
   display: flex;
   align-items: center;
-  justify-content: center;
-  margin-top: 30px;
-  padding: 20px;
+  justify-content: center; 
+  padding: 0px; 
   width: 100%;
-  max-width: 1400px;
-  margin: 30px auto;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  padding-bottom: 20px; /* 为滚动条预留空间 */
+  max-width: 1000px; 
+  margin: 20px auto; 
+  flex-wrap: wrap; 
 }
 
-/* 自定义滚动条样式 */
 .modules-container::-webkit-scrollbar {
-  height: 8px;
+  display: none;
 }
 
 .modules-container::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 10px;
+  display: none;
 }
 
 .modules-container::-webkit-scrollbar-thumb {
-  background: rgba(33, 150, 243, 0.3);
-  border-radius: 10px;
+  display: none;
 }
 
-.modules-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(33, 150, 243, 0.5);
-}
-
-@media (max-width: 1200px) {
+@media (max-width: 840px) {
   .modules-container {
-    padding: 10px;
-    justify-content: flex-start;
+    max-width: 650px;
+    padding: 0 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 15px;
   }
-  
   .module-card {
-    min-width: 200px; /* 确保卡片不会太小 */
+    width: calc(50% - 20px);
+    margin: 0 0 20px 0;
+  }
+  .arrow {
+    display: none;
   }
 }
 
-@media (max-width: 768px) {
-  .module-card {
-    min-width: 180px;
+@media (max-width: 550px) {
+  .modules-container {
+    max-width: 100%;
+    padding: 0 20px;
+    flex-direction: column;
+    align-items: center;
   }
-  
+  .module-card {
+    width: 100%;
+    max-width: 280px;
+    margin: 0 0 40px 0;
+  }
   .arrow {
-    margin: 0 15px;
-    font-size: 36px;
+    transform: rotate(90deg);
+    margin: 10px 0;
+    font-size: 30px;
+  }
+  .arrow:last-child {
+    display: none;
   }
 }
 
 .module-card {
-  width: 220px;
-  height: 250px;
+  width: 225px; 
+  height: 225px;
   border: none;
-  border-radius: 20px;
+  border-radius: 25px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   position: relative;
   background: rgba(255, 255, 255, 0.25);
-  box-shadow: 
+  box-shadow:
     0 4px 10px rgba(0, 0, 0, 0.05),
     0 10px 30px rgba(31, 38, 135, 0.1);
   backdrop-filter: blur(8px);
@@ -442,6 +500,65 @@ const getModuleIcon = (iconName: string) => {
   transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   z-index: 1;
   overflow: hidden;
+  margin-bottom: 25px; 
+}
+
+.modules-container .module-card:not(:nth-child(3n)) {
+  margin-right: 20px; 
+}
+
+.arrow {
+  width: 50px;
+  height: 50px;
+  flex-shrink: 0;
+  color: #2196f3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.8;
+  animation: pulse 1.5s infinite;
+  text-shadow: 0 0 15px rgba(33, 150, 243, 0.5);
+  z-index: 1;
+  font-size: 32px;
+  margin: 0 20px;
+  transition: all 0.3s ease;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.arrow:hover {
+  opacity: 1;
+  transform: scale(1.1);
+  background: rgba(33, 150, 243, 0.1);
+}
+
+.arrow:not(.arrow-down) {
+  margin-right: 55px; 
+}
+
+.module-card {
+  flex-basis: calc(33.33% - 13.33px); /* Three cards per row */
+  max-width: 225px; /* Fixed width for each card */
+  height: 250px;
+  border: none;
+  border-radius: 25px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  background: rgba(255, 255, 255, 0.25);
+  box-shadow:
+    0 4px 10px rgba(0, 0, 0, 0.05),
+    0 10px 30px rgba(31, 38, 135, 0.1);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 40px;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  z-index: 1;
+  overflow: hidden;
+  margin-bottom: 35px; 
 }
 
 .module-card::before {
@@ -478,35 +595,32 @@ const getModuleIcon = (iconName: string) => {
 
 .status-icon {
   position: absolute;
-  top: 15px;
+  top: 8px;
   right: 15px;
-  font-size: 28px;
+  font-size: 28px; 
   z-index: 2;
-  filter: drop-shadow(0 0 5px rgba(0, 0, 0, 0.2));
+  color: inherit; 
 }
 
 .status-empty {
   color: #9e9e9e;
-  text-shadow: 0 0 10px rgba(158, 158, 158, 0.3);
 }
 
 .status-pending {
   color: #ff9800;
-  text-shadow: 0 0 10px rgba(255, 152, 0, 0.3);
 }
 
 .status-completed {
   color: #4caf50;
-  text-shadow: 0 0 10px rgba(76, 175, 80, 0.3);
 }
 
 .status-warning {
   color: #f44336;
-  text-shadow: 0 0 10px rgba(244, 67, 54, 0.3);
 }
 
 .module-icon {
   margin-bottom: 20px;
+  font-size: 48px; 
 }
 
 .icon-circle {
@@ -570,22 +684,27 @@ const getModuleIcon = (iconName: string) => {
 .module-title {
   font-size: 22px;
   font-weight: 600;
-  margin-top: 20px;
+  margin-top: 10px;
   text-align: center;
 }
 
 .arrow {
-  margin: 0 25px;
-  font-size: 48px;
+  flex-basis: 60px; 
+  flex-shrink: 0; 
   color: #2196f3;
   display: flex;
   align-items: center;
   justify-content: center;
-  position: relative;
-  opacity: 0.8;
-  animation: pulse 1.5s infinite;
-  text-shadow: 0 0 15px rgba(33, 150, 243, 0.5);
-  z-index: 0;
+  font-size: 45px;
+}
+
+.arrow.arrow-down {
+  flex-basis: 100%; 
+  margin: 30px auto; 
+  justify-content: center;
+  opacity: 0.6;
+  animation: none; 
+  font-size: 60px; 
 }
 
 @keyframes pulse {
@@ -615,4 +734,5 @@ const getModuleIcon = (iconName: string) => {
   border-style: none;
   -webkit-tap-highlight-color: transparent;
 }
+
 </style>

@@ -169,8 +169,25 @@ const hideCourseInfoPanel = () => {
 }
 
 // 显示课程模块内容
-const showModule = (moduleId: string) => {
-  selectedModuleId.value = moduleId
+const showModule = (moduleId: string | { component: string, props?: any }) => {
+  // 如果是对象，说明传入了组件和props
+  if (typeof moduleId === 'object' && moduleId !== null) {
+    if (moduleId.component === 'TeachingLecture') {
+      showTeachingLecture.value = true
+      showCourseOutline.value = false
+      showCourseDescription.value = false
+      showCourseInfo.value = false
+      // 可以在这里处理props
+      if (moduleId.props) {
+        // 更新selectedModuleId
+        selectedModuleId.value = 'lecture'
+      }
+    }
+    return
+  }
+  
+  // 处理字符串类型的moduleId
+  selectedModuleId.value = moduleId as string
   if (moduleId === 'basic') {
     showCourseDescription.value = true
     showCourseInfo.value = false
@@ -231,6 +248,8 @@ const backToFunctionSelect = () => {
       <TeachingLecture
         v-else-if="showTeachingLecture"
         :courseId="selectedCourseId"
+        :courseName="selectedCourseTitle"
+        :showEditor="selectedModuleId === 'lecture'"
         @back="backToFunctionSelect"
       />
     </div>

@@ -1,18 +1,23 @@
 <template>
   <div class="teaching-lecture-container">
-    <div class="header">
-      <button class="back-button" @click="$emit('back')">←</button>
-      <h3 class="section-title">教学讲义</h3>
+    <div class="header-container">
+      <button class="back-button" @click="handleBack">←</button>
+      <h1 class="title">{{ showEditor ? '讲义编辑器' : '教学讲义' }}</h1>
       <div class="header-right">
-        <button class="ai-btn" @click="showPrompt = true">
-          <span class="ai-icon">✨</span>
-          AI生成
+        <template v-if="!showEditor">
+          <button class="ai-btn" @click="openPrompt()">
+            <span class="ai-icon">✨</span>
+            AI生成
+          </button>
+          <button class="save-btn" @click="handleSave" :disabled="isSaving">保存</button>
+        </template>
+        <button v-else class="back-to-lecture" @click="showEditor = false">
+          生成讲义
         </button>
-        <!-- <button class="btn btn-secondary" @click="handleSaveDraft">暂存</button> -->
-        <button class="btn btn-primary" @click="handleSave">保存</button>
       </div>
     </div>
 
+    <!-- 状态消息 -->
     <div v-if="isLoading" class="status-message loading">
       <div class="spinner"></div>
       <span>{{ loadingMessage }}</span>
@@ -38,7 +43,16 @@
       <span>{{ error }}</span>
     </div>
 
-    <div class="content-container">
+    <!-- 讲义编辑器视图 -->
+    <div v-if="showEditor" class="lecture-editor-container">
+      <LectureEditor 
+        :course-id="courseId"
+        @back="showEditor = false"
+      />
+    </div>
+    
+    <!-- 原教学讲义视图 -->
+    <div v-else class="content-container">
       <!-- 左侧目录 -->
       <div class="catalog-panel" :class="{ 'collapsed': !catalogExpanded }">
         <Catalog 
@@ -52,32 +66,40 @@
       <!-- 右侧编辑器 -->
       <div class="editor-panel" :class="{ 'expanded': !catalogExpanded }">
         <Markdown 
-          ref="markdownEditor"
+          ref="markdownRef"
           v-model="markdownContent"
           :height="editorHeight"
           preview-style="tab"
+          :editable="true"
+          placeholder="开始编写教学讲义..."
           @update:content="updateContent"
         />
+        <button v-if="showOptimizeButton" class="ai-optimize-btn" :style="optimizeButtonPosition" @click="openAIOptimize">
+          ✨ AI优化
+        </button>
       </div>
     </div>
     
-    <Prompt
+    <AiPromptDialog
       :is-visible="showPrompt"
-      title="AI生成讲义内容"
-      description="请输入您想要AI生成的讲义内容描述或指令"
-      placeholder="例如：生成关于分布式系统CAP理论的讲解，包括概念和应用案例"
-      @close="showPrompt = false"
-      @confirm="handlePromptConfirm"
+      :reference-content="selectedText"
+      :ai-content="aiGeneratedContent"
+      :is-generating="isGenerating"
+      @close="handleCloseDialog"
+      @replace="handleReplace"
+      @insert="handleInsert"
+      @generate="handleGenerateLecture"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, defineProps } from 'vue';
+import { ref, onMounted, onUnmounted, defineProps, defineEmits, watch } from 'vue';
 import Markdown from './markdown.vue';
 import Catalog from './Catalog.vue';
-import Prompt from './Prompt.vue';
+import AiPromptDialog from './AiPromptDialog.vue'; // Changed from Prompt to AiPromptDialog
 import { getCourseMaterial, saveCourseMaterial, generateCourseMaterial } from '../api/functions';
+import LectureEditor from './LectureEditor.vue';
 
 // 定义API响应类型（已注释，未使用）
 // interface ApiResponse<T = any> {
@@ -105,15 +127,29 @@ interface MaterialResponse {
   [key: string]: any; // Allow additional properties
 }
 
-const props = defineProps({
-  courseId: {
-    type: Number,
-    required: false,
-    default: undefined
-  }
+interface MarkdownInstance {
+  setMarkdown: (content: string) => void;
+  getMarkdown: () => string;
+  insertText: (content: string) => void;
+  [key: string]: any;
+}
+
+interface Props {
+  courseId?: number | string;
+  courseName?: string;
+  showEditor?: boolean;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  courseId: 0,
+  courseName: '',
+  showEditor: false
 });
 
 const emit = defineEmits(['back', 'save', 'save-draft']);
+
+// Markdown组件引用
+const markdownRef = ref<MarkdownInstance | null>(null);
 
 // 状态变量
 const isLoading = ref(false);
@@ -127,6 +163,10 @@ const error = ref('');
 
 // 控制Prompt组件显示
 const showPrompt = ref(false);
+const selectedText = ref('');
+const showOptimizeButton = ref(false);
+const optimizeButtonPosition = ref({ top: '0px', left: '0px' });
+const aiGeneratedContent = ref('');
 
 // 目录展开状态
 const catalogExpanded = ref(true);
@@ -137,67 +177,50 @@ const handleCatalogToggle = (expanded: boolean) => {
 };
 
 // 处理Prompt提交事件
-const handlePromptConfirm = async (content: string) => {
-  if (!props.courseId || isNaN(props.courseId)) {
+const handleGenerateLecture = async (requirements: string) => { // Renamed from handlePromptConfirm
+  const courseId = typeof props.courseId === 'string' ? parseInt(props.courseId, 10) : props.courseId;
+  if (isNaN(courseId) || courseId <= 0) {
     error.value = '课程ID无效，无法生成讲义';
     console.error('无效的课程ID:', props.courseId);
-    showPrompt.value = false;
     return;
   }
   
-  if (!content.trim()) {
+  if (!requirements.trim()) { // Changed from content to requirements
     error.value = '请输入有效的描述内容';
     return;
   }
   
-  showPrompt.value = false;
+  // showPrompt.value = false; // Dialog closes itself after generate
   isGenerating.value = true;
   generatingStatus.value = '正在生成讲义内容...';
+  aiGeneratedContent.value = '正在生成中，请稍候...';
   error.value = '';
   
   try {
-    // 假设我们使用课程标题作为第二个参数，这里可以修改为实际需求
-    const courseTitle = '课程讲义'; // 可以从props或其他地方获取实际标题
-    const response = await generateCourseMaterial(props.courseId, courseTitle, content) as MaterialResponse;
+    const courseTitle = '课程讲义';
+    const response = await generateCourseMaterial(courseId, courseTitle, requirements) as MaterialResponse;
     
     if (response?.content) {
-      markdownContent.value = response.content;
+      aiGeneratedContent.value = response.content; // Update aiGeneratedContent
     } else if (response && response.units) {
-      // 处理新的响应格式，拼接所有单元的讲义内容
       let combinedContent = '';
       response.units.forEach((unit: LectureUnit, index: number) => {
         if (index > 0) {
-          combinedContent += '\n\n---\n\n'; // 单元之间添加分隔线
+          combinedContent += '\n\n---\n\n';
         }
-        
         combinedContent += unit.lecture_content;
       });
-      
-      console.log('生成的内容长度:', combinedContent.length);
-      markdownContent.value = combinedContent;
+      aiGeneratedContent.value = combinedContent;
     } else {
-      error.value = '生成的讲义内容为空，请尝试提供更详细的描述';
-      isGenerating.value = false;
-      return;
+      throw new Error('API返回的数据格式不正确或内容为空');
     }
     
-    // 使用ref更新Markdown组件
-    if (markdownEditor.value && markdownEditor.value.setMarkdown) {
-      console.log('准备更新生成的内容到编辑器');
-      setTimeout(() => {
-        markdownEditor.value.setMarkdown(markdownContent.value);
-        console.log('编辑器内容已更新');
-      }, 100); // 添加短暂延时确保渲染正确
-    }
-    
-    showSuccessMessage.value = true;
-    successMessage.value = '生成成功！';
-    setTimeout(() => {
-      showSuccessMessage.value = false;
-    }, 3000);
+    generatingStatus.value = '生成完成';
+    // No direct update to markdownContent.value here. It's done via handleReplace/handleInsert from AiPromptDialog
   } catch (err) {
     console.error('生成讲义失败', err);
     error.value = '生成讲义失败，请稍后重试';
+    aiGeneratedContent.value = '生成失败，请重试。'; // Display error in dialog
   } finally {
     isGenerating.value = false;
   }
@@ -205,6 +228,25 @@ const handlePromptConfirm = async (content: string) => {
 
 // 示例讲义内容
 const markdownContent = ref('');
+
+// 是否显示编辑器
+const showEditor = ref(props.showEditor);
+
+// 监听props.showEditor变化
+watch(() => props.showEditor, (newVal: boolean) => {
+  if (newVal !== undefined) {
+    showEditor.value = newVal;
+  }
+});
+
+// 处理返回按钮
+const handleBack = () => {
+  if (showEditor.value) {
+    showEditor.value = false;
+  } else {
+    emit('back');
+  }
+};
 
 // 当前活跃的标题锚点
 const activeHeading = ref('');
@@ -228,16 +270,15 @@ const updateContent = (content: string) => {
 
 // 获取课程讲义
 const fetchCourseMaterial = async () => {
-  if (!props.courseId || isNaN(props.courseId)) {
-    error.value = '课程ID无效，无法获取讲义';
-    console.error('无效的课程ID:', props.courseId);
-    return;
-  }
+  if (!props.courseId) return;
+  
   isLoading.value = true;
   loadingMessage.value = '正在加载讲义内容...';
-  error.value = '';
+  
   try {
-    const response = await getCourseMaterial(props.courseId);
+    // 确保courseId是数字类型
+    const courseId = typeof props.courseId === 'string' ? parseInt(props.courseId, 10) : props.courseId;
+    const response = await getCourseMaterial(courseId);
     console.log('获取讲义接口返回:', response);
     let content = '';
     if (response?.data && typeof response.data === 'object') {
@@ -338,21 +379,19 @@ const scrollToHeading = (anchor: string) => {
 
 // 保存讲义
 const handleSave = async () => {
-  if (!props.courseId || isNaN(props.courseId)) {
-    error.value = '课程ID无效，无法保存讲义';
-    console.error('无效的课程ID:', props.courseId);
-    return;
-  }
+  if (!markdownContent.value.trim() || !props.courseId) return;
+  
   isSaving.value = true;
-  error.value = '';
+  
   try {
-    if (markdownEditor.value && markdownEditor.value.getMarkdown) {
-      markdownContent.value = markdownEditor.value.getMarkdown();
+    // 确保courseId是数字类型
+    const courseId = typeof props.courseId === 'string' ? parseInt(props.courseId, 10) : props.courseId;
+    if (isNaN(courseId) || courseId <= 0) {
+      throw new Error('无效的课程ID');
     }
-    console.log('准备保存讲义内容:', markdownContent.value);
-    await saveCourseMaterial(props.courseId, {
-      content: markdownContent.value
-    });
+    
+    // 调用保存API
+    await saveCourseMaterial(courseId, markdownContent.value);
     console.log('保存讲义内容成功:', markdownContent.value);
     showSuccessMessage.value = true;
     successMessage.value = '保存成功！';
@@ -367,15 +406,76 @@ const handleSave = async () => {
   }
 };
 
+const handleReplace = (content: string) => {
+  if (markdownRef.value && markdownRef.value.setMarkdown) {
+      markdownRef.value.setMarkdown(content);
+  }
+};
+
+const handleInsert = (content: string) => {
+  if (markdownRef.value && markdownRef.value.insertText) {
+      markdownRef.value.insertText(content);
+  } else {
+    markdownContent.value += `\n${content}`;
+  }
+};
+
+const handleCloseDialog = () => {
+  showPrompt.value = false;
+  aiGeneratedContent.value = ''; // Reset on close
+};
+
+const openPrompt = (text: string = '') => {
+  if (isGenerating.value || isLoading.value || isSaving.value) {
+    return;
+  }
+  selectedText.value = text;
+  aiGeneratedContent.value = '未生成'; // Reset content when opening
+  showPrompt.value = true;
+};
+
+const handleSelectionChange = () => {
+  const selection = window.getSelection();
+  if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+    const range = selection.getRangeAt(0);
+    const editorEl = (markdownRef.value?.$el as HTMLElement)?.querySelector('.editor-wrapper') || (markdownRef.value?.$el as HTMLElement);
+    if (!editorEl) return;
+
+    const editorRect = editorEl.getBoundingClientRect();
+    const rect = range.getBoundingClientRect();
+
+    if (rect.top >= editorRect.top && rect.bottom <= editorRect.bottom) {
+      selectedText.value = selection.toString().trim();
+      if (selectedText.value.length > 0) {
+        showOptimizeButton.value = true;
+        optimizeButtonPosition.value = {
+          top: `${rect.bottom - editorRect.top + 10}px`, // Position 10px below selection
+          left: `${rect.left - editorRect.left + rect.width / 2}px`,
+        };
+      }
+    } else {
+      showOptimizeButton.value = false;
+    }
+  } else {
+    showOptimizeButton.value = false;
+  }
+};
+
+const openAIOptimize = () => {
+  openPrompt(selectedText.value);
+};
+
 onMounted(() => {
   updateEditorHeight();
   window.addEventListener('resize', updateEditorHeight);
   console.log('TeachingLecture组件挂载，courseId:', props.courseId);
   fetchCourseMaterial(); // 加载讲义内容
+  document.addEventListener('selectionchange', handleSelectionChange); // Add selection change listener
 });
 
 onUnmounted(() => {
   window.removeEventListener('resize', updateEditorHeight);
+  document.removeEventListener('selectionchange', handleSelectionChange); // Remove selection change listener
 });
 </script>
 
@@ -384,16 +484,18 @@ onUnmounted(() => {
   max-width: 1500px;
   margin: 0 auto;
   padding: 20px;
+  overflow: hidden; /* 隐藏滚动条 */
   height: 100%;
   display: flex;
   flex-direction: column;
 }
 
-.header {
+.header-container { /* Renamed from .header */
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  padding: 1rem;
+  position: relative;
 }
 
 .header-right {
@@ -421,13 +523,71 @@ onUnmounted(() => {
   background-color: rgba(33, 150, 243, 0.1);
 }
 
-.section-title {
-  font-size: 24px;
-  font-weight: 500;
+.title { /* Changed from .section-title */
+  font-size: 24px; /* 统一字号 */
+  font-weight: bold; /* 统一字重 */
   color: #333;
-  margin-bottom: 10px;
   text-align: center;
-  flex-grow: 1;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  user-select: none; /* 禁止选中 */
+}
+
+/* Removed .section-title existing styles */
+
+.ai-btn {
+  display: flex;
+  align-items: center;
+  background-color: rgba(76, 175, 80, 0.7);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s;
+}
+
+.ai-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ai-btn:hover:not(:disabled) {
+  background-color: rgba(76, 175, 80, 0.85);
+}
+
+.ai-icon {
+  margin-right: 8px;
+}
+
+.save-btn { /* Changed from .btn .btn-primary */
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  background-color: rgba(76, 175, 80, 0.7);
+  color: white;
+}
+
+.save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.save-btn:hover:not(:disabled) {
+  background-color: rgba(76, 175, 80, 0.85);
 }
 
 .status-message {
@@ -514,70 +674,33 @@ onUnmounted(() => {
   flex-grow: 1;
   overflow-y: auto;
   transition: width 0.3s ease;
+  position: relative; /* Added for AI Optimize button positioning */
 }
 
 .editor-panel.expanded {
   width: calc(100% - 60px);
 }
 
-.ai-btn {
-  display: flex;
-  align-items: center;
-  background-color: rgba(76, 175, 80, 0.7);
+/* Removed .btn, .btn-primary, .btn-secondary styles as they are replaced by .save-btn */
+
+.ai-optimize-btn {
+  position: absolute;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  background-color: #6366f1;
   color: white;
   border: none;
-  border-radius: 4px;
-  padding: 8px 16px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 14px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+  transition: all 0.2s ease;
 }
 
-.ai-btn:hover {
-  background-color: rgba(76, 175, 80, 0.85);
-}
-
-.ai-icon {
-  margin-right: 8px;
-}
-
-.btn {
-  padding: 10px 20px;
-  border-radius: 4px;
-  border: none;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.3s;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-.btn-primary {
-  background-color: rgba(76, 175, 80, 0.7);
-  color: white;
-}
-
-.btn-primary:hover {
-  background-color: rgba(76, 175, 80, 0.85);
-}
-
-.btn-secondary {
-  background-color: rgba(245, 245, 245, 0.7);
-  color: #333;
-}
-
-.btn-secondary:hover {
-  background-color: rgba(245, 245, 245, 0.85);
-}
-
-.btn:hover {
-  opacity: 0.9;
+.ai-optimize-btn:hover {
+  background-color: #4f46e5;
+  transform: translateX(-50%) translateY(-2px);
 }
 
 @media (max-width: 768px) {
@@ -590,5 +713,90 @@ onUnmounted(() => {
     height: auto;
     max-height: 300px;
   }
+}
+
+/* 隐藏全局滚动条 */
+/* 编辑器容器样式 */
+.lecture-editor-container {
+  height: calc(100vh - 120px);
+  margin: 10px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+}
+
+/* 编辑讲义按钮 */
+.action-buttons {
+  margin: 10px 0 15px 20px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.edit-lecture-btn {
+  background-color: #409eff;
+  color: white;
+  border: none;
+  padding: 8px 15px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.3s;
+}
+
+.edit-lecture-btn:hover {
+  background-color: #66b1ff;
+  transform: translateY(-1px);
+}
+
+.edit-lecture-btn i {
+  font-size: 16px;
+}
+
+/* 返回按钮样式 */
+.back-to-lecture {
+  background-color: #67c23a;
+  color: white;
+  border: none;
+  padding: 8px 15px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.back-to-lecture:hover {
+  background-color: #85ce61;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+  .lecture-editor-container {
+    height: calc(100vh - 150px);
+    margin: 5px;
+  }
+  
+  .action-buttons {
+    margin: 5px 10px 10px 10px;
+  }
+  
+  .edit-lecture-btn,
+  .back-to-lecture {
+    padding: 6px 12px;
+    font-size: 14px;
+  }
+}
+
+body {
+  overflow: hidden;
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+* {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
 }
 </style>

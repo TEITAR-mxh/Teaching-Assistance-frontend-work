@@ -199,7 +199,9 @@ const showCourseInfo = () => {
 
 // 显示模块内容
 const showModule = (moduleId: string) => {
+  console.log('FunctionSelect: showModule被调用，moduleId:', moduleId)
   if (moduleId === 'lecture') {
+    console.log('FunctionSelect: 准备导航到TeachingLecture组件')
     // 导航到TeachingLecture组件并设置showEditor为true
     emit('show-module', { 
       component: 'TeachingLecture', 
@@ -209,7 +211,9 @@ const showModule = (moduleId: string) => {
         showEditor: true  // 添加showEditor参数
       }
     });
+    console.log('FunctionSelect: TeachingLecture 导航事件已发出')
   } else {
+    console.log('FunctionSelect: 发出普通模块切换事件')
     emit('show-module', moduleId);
   }
 }
@@ -457,56 +461,6 @@ const getModuleIcon = (iconName: string) => {
   }
 }
 
-@media (max-width: 550px) {
-  .modules-container {
-    max-width: 100%;
-    padding: 0 20px;
-    flex-direction: column;
-    align-items: center;
-  }
-  .module-card {
-    width: 100%;
-    max-width: 280px;
-    margin: 0 0 40px 0;
-  }
-  .arrow {
-    transform: rotate(90deg);
-    margin: 10px 0;
-    font-size: 30px;
-  }
-  .arrow:last-child {
-    display: none;
-  }
-}
-
-.module-card {
-  width: 225px; 
-  height: 225px;
-  border: none;
-  border-radius: 25px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  background: rgba(255, 255, 255, 0.25);
-  box-shadow:
-    0 4px 10px rgba(0, 0, 0, 0.05),
-    0 10px 30px rgba(31, 38, 135, 0.1);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  padding: 25px;
-  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  z-index: 1;
-  overflow: hidden;
-  margin-bottom: 25px; 
-}
-
-.modules-container .module-card:not(:nth-child(3n)) {
-  margin-right: 20px; 
-}
-
 .arrow {
   width: 50px;
   height: 50px;
@@ -519,8 +473,8 @@ const getModuleIcon = (iconName: string) => {
   animation: pulse 1.5s infinite;
   text-shadow: 0 0 15px rgba(33, 150, 243, 0.5);
   z-index: 1;
-  font-size: 32px;
-  margin: 0 20px;
+  font-size: 45px;
+  margin: 0 30px;
   transition: all 0.3s ease;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.1);
@@ -537,8 +491,8 @@ const getModuleIcon = (iconName: string) => {
 }
 
 .module-card {
-  flex-basis: calc(33.33% - 13.33px); /* Three cards per row */
-  max-width: 225px; /* Fixed width for each card */
+  flex-basis: calc(33.33% - 13.33px);
+  max-width: 235px;
   height: 250px;
   border: none;
   border-radius: 25px;
@@ -559,38 +513,6 @@ const getModuleIcon = (iconName: string) => {
   z-index: 1;
   overflow: hidden;
   margin-bottom: 35px; 
-}
-
-.module-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: -1;
-  background: linear-gradient(
-    135deg, 
-    rgba(255, 255, 255, 0.3) 0%, 
-    rgba(255, 255, 255, 0.1) 100%
-  );
-  border-radius: 20px;
-  opacity: 0;
-  transition: opacity 0.4s ease;
-}
-
-.module-card:hover {
-  transform: translateY(-15px) scale(1.03);
-  box-shadow: 
-    0 10px 20px rgba(0, 0, 0, 0.08),
-    0 20px 40px rgba(31, 38, 135, 0.15),
-    0 0 15px rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  z-index: 2;
-}
-
-.module-card:hover::before {
-  opacity: 1;
 }
 
 .status-icon {
@@ -686,16 +608,6 @@ const getModuleIcon = (iconName: string) => {
   font-weight: 600;
   margin-top: 10px;
   text-align: center;
-}
-
-.arrow {
-  flex-basis: 60px; 
-  flex-shrink: 0; 
-  color: #2196f3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 45px;
 }
 
 .arrow.arrow-down {

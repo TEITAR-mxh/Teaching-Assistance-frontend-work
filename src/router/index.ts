@@ -32,6 +32,11 @@ const router = createRouter({
       path: '/api-test',
       name: 'api-test',
       component: ApiTest
+    },
+    {
+      path: '/teaching-lecture',
+      name: 'teaching-lecture',
+      component: () => import('../views/TeachingLectureView.vue')
     }
   ]
 })

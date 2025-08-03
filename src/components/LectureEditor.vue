@@ -1,19 +1,45 @@
 <template>
   <div class="lecture-editor">
+    <!-- 状态消息 -->
+    <div v-if="isLoading" class="status-message loading">
+      <div class="spinner"></div>
+      <span>{{ loadingMessage }}</span>
+    </div>
+
+    <div v-if="isGenerating" class="status-message generating">
+      <div class="spinner"></div>
+      <span>{{ generatingStatus }}</span>
+    </div>
+
+    <div v-if="isSaving" class="status-message saving">
+      <div class="spinner"></div>
+      <span>正在保存...</span>
+    </div>
+
+    <div v-if="showSuccessMessage" class="status-message success">
+      <span class="success-icon">✓</span>
+      <span>{{ successMessage }}</span>
+    </div>
+
+    <div v-if="error" class="status-message error">
+      <span class="error-icon">❌</span>
+      <span>{{ error }}</span>
+    </div>
+
     <div class="lecture-container">
       <!-- Sidebar - Chapter List -->
       <div class="lecture-sidebar">
         <div class="sidebar-header">
           <h3>课程章节</h3>
-          <el-button type="primary" size="small" @click="showAddChapterDialog">
+          <button class="add-chapter-btn" @click="showAddChapterDialog">
             <i class="el-icon-plus"></i> 添加章节
-          </el-button>
+          </button>
         </div>
         
         <div class="chapter-list">
           <draggable 
             v-model="chapters" 
-            item-key="id"
+            item-key="id" 
             @end="onChapterOrderChange"
             handle=".drag-handle"
           >
@@ -57,9 +83,6 @@
         <div v-if="currentChapter" class="chapter-editor">
           <div class="editor-header">
             <div class="header-left">
-              <el-button type="primary" @click="generateContent" class="generate-btn">
-                <i class="el-icon-magic-stick"></i> AI 生成内容
-              </el-button>
               <el-input
                 v-model="currentChapter.title"
                 placeholder="章节标题"
@@ -68,560 +91,536 @@
               />
             </div>
             <div class="header-right">
-              <el-button-group>
-                <el-button 
-                  :type="editorMode === 'edit' ? 'primary' : ''" 
-                  @click="editorMode = 'edit'"
-                >
-                  <i class="el-icon-edit"></i> 编辑
-                </el-button>
-                <el-button 
-                  :type="editorMode === 'preview' ? 'primary' : ''" 
-                  @click="editorMode = 'preview'"
-                >
-                  <i class="el-icon-view"></i> 预览
-                </el-button>
-              </el-button-group>
-              <el-button 
-                type="success" 
+              <button class="ai-btn" @click="generateChapterContent" style="position: static; transform: none;">
+                <span class="ai-icon">✨</span>
+                AI生成
+              </button>
+              <button 
+                class="publish-btn" 
                 @click="publishChapter"
-                :loading="publishing"
+                :disabled="publishing"
               >
-                <i class="el-icon-upload"></i> 发布章节
-              </el-button>
+                <i class="el-icon-upload">📩</i> 发布章节
+              </button>
             </div>
           </div>
 
           <div class="editor-container">
             <div v-if="editorMode === 'edit'" class="markdown-editor">
-              <el-input
+              <MarkdownEditor
                 v-model="currentChapter.content"
-                type="textarea"
-                :rows="25"
-                :autosize="{ minRows: 10, maxRows: 50 }"
-                placeholder="输入 Markdown 格式的内容..."
-                @input="onContentChange"
-                resize="none"
+                @update:modelValue="handleContentChange"
               />
             </div>
-            <div v-else class="markdown-preview" v-html="compiledMarkdown"></div>
+            <div v-else class="markdown-preview">
+              <div v-html="renderedContent"></div>
+            </div>
           </div>
         </div>
+        
         <div v-else class="no-chapter-selected">
-          <el-empty description="请从左侧选择或创建章节">
-            <el-button type="primary" @click="showAddChapterDialog">添加新章节</el-button>
-          </el-empty>
+          <el-empty description="请选择或创建一个章节" />
         </div>
       </div>
     </div>
 
     <!-- Add Chapter Dialog -->
-    <el-dialog 
-      title="添加新章节" 
-      v-model="addChapterDialog.visible" 
-      width="500px"
+    <el-dialog
+      v-model="showDialog"
+      title="添加新章节"
+      width="30%"
       :close-on-click-modal="false"
     >
-      <el-form :model="addChapterForm" :rules="addChapterRules" ref="addChapterForm">
-        <el-form-item label="章节标题" prop="title">
-          <el-input v-model="addChapterForm.title" placeholder="请输入章节标题"></el-input>
-        </el-form-item>
-        <el-form-item label="章节位置" prop="position">
-          <el-select v-model="addChapterForm.position" placeholder="请选择添加位置" style="width: 100%">
-            <el-option 
-              v-for="(chapter, index) in chapters" 
-              :key="chapter.id" 
-              :label="`在 ${chapter.title} 之后`"
-              :value="index + 1"
-            />
-            <el-option :label="`添加到最后`" :value="chapters.length" />
-          </el-select>
+      <el-form :model="newChapter" label-width="80px">
+        <el-form-item label="章节标题">
+          <el-input v-model="newChapter.title" />
         </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="addChapterDialog.visible = false">取 消</el-button>
-          <el-button type="primary" @click="confirmAddChapter" :loading="addChapterDialog.loading">确 定</el-button>
+          <el-button @click="showDialog = false">取消</el-button>
+          <el-button type="primary" @click="addChapter">确认</el-button>
         </span>
       </template>
     </el-dialog>
   </div>
 </template>
 
-<script>
+<script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
-import { useRouter } from 'vue-router';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import draggable from 'vuedraggable';
+import MarkdownEditor from './markdown.vue';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 
-export default {
-  name: 'LectureEditor',
+interface Chapter {
+  id: number;
+  title: string;
+  content?: string;
+  status: 'empty' | 'draft' | 'published';
+}
+
+// Props 和 Emits
+const props = defineProps<{
+  courseId?: number;
+  courseName?: string;
+}>();
+
+const emit = defineEmits(['back']);
+
+// 状态变量
+const isLoading = ref(false);
+const loadingMessage = ref('');
+const isGenerating = ref(false);
+const generatingStatus = ref('');
+const isSaving = ref(false);
+const showSuccessMessage = ref(false);
+const successMessage = ref('');
+const error = ref('');
+const publishing = ref(false);
+const showDialog = ref(false);
+const editorMode = ref('edit');
+const chapters = ref<Chapter[]>([]);
+const currentChapter = ref<Chapter | null>(null);
+const hasUnsavedChanges = ref(false);
+const originalContent = ref('');
+
+const saveContent = async () => {
+  if (!currentChapter.value) return;
   
-  props: {
-    courseId: {
-      type: [String, Number],
-      required: true
-    },
-    courseName: {
-      type: String,
-      default: '课程讲义'
-    }
-  },
-
-  components: {
-    draggable
-  },
-  
-  setup(props) {
-    const router = useRouter();
+  isSaving.value = true;
+  try {
+    // TODO: 实现保存内容的API调用
+    // 在这里调用后端API保存内容
     
-    // 状态管理
-    const chapters = ref(JSON.parse(localStorage.getItem('lectureChapters') || '[]'));
-    const currentChapter = ref(null);
-    const editorMode = ref('edit');
-    const publishing = ref(false);
-    const hasUnsavedChanges = ref(false);
+    // 更新原始内容和状态
+    originalContent.value = currentChapter.value.content || '';
+    hasUnsavedChanges.value = false;
     
-    // 添加章节对话框
-    const addChapterDialog = ref({
-      visible: false,
-      loading: false
-    });
-    
-    const addChapterForm = ref({
-      title: '',
-      position: 0
-    });
-    
-    const addChapterRules = {
-      title: [
-        { required: true, message: '请输入章节标题', trigger: 'blur' },
-        { min: 2, message: '章节标题不能少于2个字符', trigger: 'blur' }
-      ],
-      position: [
-        { required: true, message: '请选择添加位置', trigger: 'change' }
-      ]
-    };
-    
-    // 如果没有章节数据，初始化一些示例数据
-    if (chapters.value.length === 0) {
-      chapters.value = [
-        { 
-          id: Date.now(), 
-          title: '第一章：课程介绍', 
-          content: '# 第一章：课程介绍\n\n这是第一章的内容...', 
-          status: 'empty',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        }
-      ];
+    // 如果章节状态为空，则更改为草稿状态
+    if (currentChapter.value.status === 'empty') {
+      currentChapter.value.status = 'draft';
     }
     
-    // 默认选中第一个章节
-    if (chapters.value.length > 0 && !currentChapter.value) {
-      currentChapter.value = chapters.value[0];
-    }
-
-    // 保存章节到本地存储
-    const saveChapters = () => {
-      localStorage.setItem('lectureChapters', JSON.stringify(chapters.value));
-    };
-    
-    // 自动保存
-    watch(chapters, () => {
-      saveChapters();
-    }, { deep: true });
-    
-    // 生成章节内容
-    const generateContent = async () => {
-      try {
-        // 这里添加AI生成内容的逻辑
-        ElMessage.info('正在生成内容，请稍候...');
-        
-        // 模拟API调用延迟
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // 生成示例内容
-        const generatedContent = `# ${currentChapter.value.title}\n\n` +
-          `## 学习目标\n- 理解${currentChapter.value.title.split('：')[1] || '本章节'}的基本概念\n- 掌握相关知识点\n- 能够应用所学知识解决问题\n\n` +
-          `## 主要内容\n- 内容1\n- 内容2\n- 内容3\n\n` +
-          `## 总结\n- 重点回顾\n- 常见问题\n\n` +
-          `## 课后练习\n1. 练习题1\n2. 练习题2`;
-        
-        currentChapter.value.content = generatedContent;
-        currentChapter.value.status = 'draft';
-        currentChapter.value.updatedAt = new Date().toISOString();
-        hasUnsavedChanges.value = true;
-        
-        ElMessage.success('内容生成成功');
-      } catch (error) {
-        console.error('生成内容失败:', error);
-        ElMessage.error('生成内容失败，请稍后重试');
-      }
-    };
-    
-    // 发布章节
-    const publishChapter = async () => {
-      if (!currentChapter.value) return;
-      
-      try {
-        publishing.value = true;
-        
-        // 这里添加发布章节的API调用
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        currentChapter.value.status = 'published';
-        currentChapter.value.publishedAt = new Date().toISOString();
-        currentChapter.value.updatedAt = new Date().toISOString();
-        hasUnsavedChanges.value = false;
-        
-        ElMessage.success('章节发布成功');
-      } catch (error) {
-        console.error('发布失败:', error);
-        ElMessage.error('发布失败，请稍后重试');
-      } finally {
-        publishing.value = false;
-      }
-    };
-
-    // 计算属性：编译Markdown为HTML
-    const compiledMarkdown = computed(() => {
-      if (!currentChapter.value?.content) return '';
-      return DOMPurify.sanitize(marked(currentChapter.value.content));
-    });
-    
-    // 获取状态文本
-    const getStatusText = (status) => {
-      const statusMap = {
-        'empty': '未生成',
-        'draft': '草稿',
-        'published': '已发布'
-      };
-      return statusMap[status] || '未知状态';
-    };
-    
-    // 显示添加章节对话框
-    const showAddChapterDialog = () => {
-      addChapterForm.value = {
-        title: `第${chapters.value.length + 1}章：新章节`,
-        position: chapters.value.length
-      };
-      addChapterDialog.value.visible = true;
-    };
-    
-    // 确认添加章节
-    const confirmAddChapter = () => {
-      const newChapter = {
-        id: Date.now(),
-        title: addChapterForm.value.title,
-        content: '',
-        status: 'empty',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      
-      // 在指定位置插入新章节
-      const position = Math.min(addChapterForm.value.position, chapters.value.length);
-      chapters.value.splice(position, 0, newChapter);
-      
-      // 更新章节编号
-      updateChapterNumbers();
-      
-      // 选中新添加的章节
-      currentChapter.value = newChapter;
-      editorMode.value = 'edit';
-      
-      // 关闭对话框
-      addChapterDialog.value.visible = false;
-      
-      ElMessage.success('章节添加成功');
-    };
-    
-    // 更新章节编号
-    const updateChapterNumbers = () => {
-      chapters.value.forEach((chapter, index) => {
-        // 只更新没有自定义标题的章节
-        if (chapter.title.startsWith('第') && chapter.title.includes('章：')) {
-          const newTitle = `第${index + 1}章：${chapter.title.split('：')[1] || '新章节'}`;
-          if (chapter.title !== newTitle) {
-            chapter.title = newTitle;
-          }
-        }
-      });
-    };
-    
-    // 确认删除章节
-    const confirmDeleteChapter = (chapter) => {
-      if (chapters.value.length <= 1) {
-        ElMessage.warning('至少需要保留一个章节');
-        return;
-      }
-      
-      ElMessageBox.confirm(
-        `确定要删除章节"${chapter.title}"吗？此操作不可恢复！`,
-        '警告',
-        {
-          confirmButtonText: '确定',
-          cancelButtonText: '取消',
-          type: 'warning'
-        }
-      ).then(() => {
-        const index = chapters.value.findIndex(c => c.id === chapter.id);
-        if (index !== -1) {
-          chapters.value.splice(index, 1);
-          
-          // 如果删除的是当前选中的章节，则选中上一个或下一个章节
-          if (currentChapter.value && currentChapter.value.id === chapter.id) {
-            if (chapters.value.length > 0) {
-              currentChapter.value = chapters.value[Math.max(0, index - 1)];
-            } else {
-              currentChapter.value = null;
-            }
-          }
-          
-          // 更新章节编号
-          updateChapterNumbers();
-          
-          ElMessage.success('章节删除成功');
-        }
-      }).catch(() => {
-        // 用户取消删除
-      });
-    };
-    
-    // 选择章节
-    const selectChapter = async (chapter) => {
-      // 检查是否有未保存的更改
-      if (hasUnsavedChanges.value && currentChapter.value) {
-        try {
-          await ElMessageBox.confirm(
-            '当前章节有未保存的更改，是否保存？',
-            '提示',
-            {
-              confirmButtonText: '保存',
-              cancelButtonText: '不保存',
-              type: 'warning'
-            }
-          );
-          
-          // 用户选择保存
-          await saveCurrentChapter();
-        } catch (error) {
-          // 用户选择不保存或取消，继续切换章节
-        }
-      }
-      
-      // 切换章节
-      currentChapter.value = chapter;
-      hasUnsavedChanges.value = false;
-      editorMode.value = 'edit';
-    };
-    
-    // 保存当前章节
-    const saveCurrentChapter = async () => {
-      if (!currentChapter.value) return;
-      
-      try {
-        // 这里添加保存到API的逻辑
-        currentChapter.value.updatedAt = new Date().toISOString();
-        hasUnsavedChanges.value = false;
-        
-        // 更新章节状态
-        if (currentChapter.value.content.trim()) {
-          currentChapter.value.status = 'draft';
-        } else {
-          currentChapter.value.status = 'empty';
-        }
-        
-        ElMessage.success('保存成功');
-        return true;
-      } catch (error) {
-        console.error('保存失败:', error);
-        ElMessage.error('保存失败，请稍后重试');
-        return false;
-      }
-    };
-    
-    // 更新章节标题
-    const updateChapterTitle = () => {
-      if (!currentChapter.value) return;
-      
-      currentChapter.value.updatedAt = new Date().toISOString();
-      hasUnsavedChanges.value = true;
-      
-      // 更新章节状态
-      if (currentChapter.value.status === 'empty' && currentChapter.value.content.trim()) {
-        currentChapter.value.status = 'draft';
-      }
-    };
-    
-    // 内容变更处理
-    const onContentChange = () => {
-      if (!currentChapter.value) return;
-      
-      currentChapter.value.updatedAt = new Date().toISOString();
-      hasUnsavedChanges.value = true;
-      
-      // 更新章节状态
-      if (currentChapter.value.status === 'empty' && currentChapter.value.content.trim()) {
-        currentChapter.value.status = 'draft';
-      }
-    };
-    
-    // 章节顺序变更
-    const onChapterOrderChange = () => {
-      updateChapterNumbers();
-      hasUnsavedChanges.value = true;
-    };
-    
-    // 组件挂载时检查URL参数
-    onMounted(() => {
-      // 检查是否有chapterId参数
-      const route = router.currentRoute.value;
-      if (route.params.chapterId) {
-        const chapter = chapters.value.find(c => c.id === parseInt(route.params.chapterId));
-        if (chapter) {
-          currentChapter.value = chapter;
-        }
-      }
-      
-      // 监听浏览器刷新/关闭事件，提示保存
-      window.addEventListener('beforeunload', (e) => {
-        if (hasUnsavedChanges.value) {
-          e.preventDefault();
-          e.returnValue = '您有未保存的更改，确定要离开吗？';
-          return e.returnValue;
-        }
-      });
-    });
-
-    return {
-      // 响应式数据
-      chapters,
-      currentChapter,
-      editorMode,
-      publishing,
-      addChapterDialog,
-      addChapterForm,
-      addChapterRules,
-      
-      // 方法
-      getStatusText,
-      showAddChapterDialog,
-      confirmAddChapter,
-      selectChapter,
-      updateChapterTitle,
-      onContentChange,
-      generateContent,
-      publishChapter,
-      confirmDeleteChapter,
-      onChapterOrderChange,
-      
-      // 计算属性
-      compiledMarkdown,
-      
-      // 组件
-      draggable
-    };
+    showSuccessMessage.value = true;
+    successMessage.value = '保存成功';
+    setTimeout(() => {
+      showSuccessMessage.value = false;
+    }, 3000);
+  } catch (err) {
+    error.value = '保存失败';
+  } finally {
+    isSaving.value = false;
   }
 };
+
+const generateContent = async () => {
+  // 如果有未保存的更改，提示用户
+  if (hasUnsavedChanges.value) {
+    try {
+      await ElMessageBox.confirm(
+        '当前有未保存的更改，是否保存？',
+        '提示',
+        {
+          confirmButtonText: '保存',
+          cancelButtonText: '不保存',
+          type: 'warning',
+          distinguishCancelAndClose: true,
+          showClose: true,
+          closeOnClickModal: false
+        }
+      );
+      // 用户选择保存
+      await saveContent();
+    } catch (action) {
+      if (action !== 'cancel') {
+        // 如果不是选择"不保存"，则取消跳转
+        return;
+      }
+      // 用户选择"不保存"，继续跳转
+    }
+  }
+  
+  // 通知父组件显示TeachingLecture组件
+  emit('back', true);
+};
+
+// 新章节的默认值
+const newChapter = ref({
+  title: '',
+});
+
+// 计算属性
+const renderedContent = computed(() => {
+  if (!currentChapter.value?.content) return '';
+  const html = marked.parse(currentChapter.value.content);
+  return DOMPurify.sanitize(html as string);
+});
+
+// 方法
+const goToTeachingLecture = async () => {
+  if (hasUnsavedChanges.value) {
+    try {
+      await ElMessageBox.confirm(
+        '当前有未保存的更改，是否保存？',
+        '提示',
+        {
+          confirmButtonText: '保存',
+          cancelButtonText: '不保存',
+          type: 'warning',
+          distinguishCancelAndClose: true,
+          showClose: true,
+          closeOnClickModal: false
+        }
+      );
+      // 用户选择保存
+      await saveContent();
+    } catch (action) {
+      if (action === 'cancel') {
+        // 用户选择不保存，继续退出
+      } else if (action === 'close') {
+        // 用户点击关闭按钮，取消退出
+        return;
+      }
+    }
+  }
+  emit('back');
+};
+
+const showAddChapterDialog = () => {
+  newChapter.value.title = '';
+  showDialog.value = true;
+};
+
+const addChapter = async () => {
+  if (!newChapter.value.title.trim()) {
+    ElMessage.warning('请输入章节标题');
+    return;
+  }
+
+  try {
+    // TODO: 实现添加章节的API调用
+    showDialog.value = false;
+    ElMessage.success('添加章节成功');
+  } catch (err) {
+    ElMessage.error('添加章节失败');
+  }
+};
+
+const selectChapter = async (chapter: Chapter) => {
+  if (hasUnsavedChanges.value) {
+    try {
+      await ElMessageBox.confirm(
+        '当前章节有未保存的更改，是否保存？',
+        '提示',
+        {
+          confirmButtonText: '保存',
+          cancelButtonText: '不保存',
+          type: 'warning',
+          distinguishCancelAndClose: true,
+          showClose: true,
+          closeOnClickModal: false
+        }
+      );
+      // 用户选择保存
+      await saveContent();
+    } catch (action) {
+      if (action === 'cancel') {
+        // 用户选择不保存，继续切换
+      } else if (action === 'close') {
+        // 用户点击关闭按钮，取消切换
+        return;
+      }
+    }
+  }
+  currentChapter.value = chapter;
+  originalContent.value = chapter.content || '';
+  hasUnsavedChanges.value = false;
+};
+
+const updateChapterTitle = async () => {
+  try {
+    // TODO: 实现更新章节标题的API调用
+    ElMessage.success('更新标题成功');
+  } catch (err) {
+    ElMessage.error('更新标题失败');
+  }
+};
+
+const onChapterOrderChange = async () => {
+  try {
+    // TODO: 实现更新章节顺序的API调用
+    ElMessage.success('更新顺序成功');
+  } catch (err) {
+    ElMessage.error('更新顺序失败');
+  }
+};
+
+const confirmDeleteChapter = (chapter: Chapter) => {
+  ElMessageBox.confirm(
+    '确定要删除这个章节吗？',
+    '警告',
+    {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  ).then(() => {
+    deleteChapter(chapter);
+  });
+};
+
+const deleteChapter = async (chapter: Chapter) => {
+  try {
+    // TODO: 实现删除章节的API调用
+    const index = chapters.value.findIndex(c => c.id === chapter.id);
+    if (index > -1) {
+      chapters.value.splice(index, 1);
+    }
+    ElMessage.success('删除章节成功');
+  } catch (err) {
+    ElMessage.error('删除章节失败');
+  }
+};
+
+const generateChapterContent = async () => {
+  isGenerating.value = true;
+  generatingStatus.value = 'AI正在生成内容...';
+  try {
+    // TODO: 实现AI生成内容的API调用
+    ElMessage.success('生成内容成功');
+  } catch (err) {
+    ElMessage.error('生成内容失败');
+  } finally {
+    isGenerating.value = false;
+  }
+};
+
+const handleContentChange = () => {
+  if (currentChapter.value && currentChapter.value.content !== originalContent.value) {
+    hasUnsavedChanges.value = true;
+  } else {
+    hasUnsavedChanges.value = false;
+  }
+};
+
+const publishChapter = async () => {
+  if (!currentChapter.value) return;
+  
+  if (hasUnsavedChanges.value) {
+    ElMessage.warning('请先保存当前更改再发布');
+    return;
+  }
+  
+  publishing.value = true;
+  try {
+    // TODO: 实现发布章节的API调用
+    // 在这里调用后端API发布章节
+    
+    // 更新章节状态为已发布
+    currentChapter.value.status = 'published';
+    ElMessage.success('发布章节成功');
+  } catch (err) {
+    ElMessage.error('发布章节失败');
+  } finally {
+    publishing.value = false;
+  }
+};
+
+// 获取状态文本
+const getStatusText = (status: Chapter['status']) => {
+  const statusMap = {
+    empty: '未开始',
+    draft: '草稿',
+    published: '已发布'
+  } as const;
+  return statusMap[status];
+};
+
+// 生命周期钩子
+onMounted(async () => {
+  isLoading.value = true;
+  loadingMessage.value = '加载课程内容...';
+  try {
+    // TODO: 实现加载章节列表的API调用
+    // 模拟数据，实际应该从API获取
+    chapters.value = [
+      { id: 1, title: '第一章：课程介绍', content: '', status: 'empty' },
+      { id: 2, title: '第二章：基础知识', content: '# 基础知识\n\n这里是基础知识内容', status: 'draft' },
+      { id: 3, title: '第三章：进阶内容', content: '# 进阶内容\n\n这里是已发布的进阶内容', status: 'published' }
+    ];
+  } catch (err) {
+    error.value = '加载课程内容失败';
+  } finally {
+    isLoading.value = false;
+  }
+});
 </script>
 
 <style scoped>
 .lecture-editor {
-  height: calc(100vh - 60px);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background-color: transparent;
+  padding: 0 20px;
+}
+
+.header-container {
+  display: flex;
+  align-items: center;
   padding: 20px;
-  background-color: #f5f7fa;
-  box-sizing: border-box;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  background-color: transparent;
+  position: relative;
+}
+
+.back-button {
+  background: transparent;
+  border: none;
+  font-size: 24px;
+  color: #2196f3;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  position: absolute;
+  left: 20px;
+}
+
+.back-button:hover {
+  background-color: rgba(33, 150, 243, 0.1);
+}
+
+.title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  color: #333;
+  flex: 1;
+  text-align: center;
+}
+
+.header-right {
+  display: flex;
+  gap: 12px;
+}
+
+.ai-btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.3s ease;
+  background-color: #2196f3;
+  color: white;
+  position: absolute;
+  right: 20px;
+  top: 15px;
+}
+
+.ai-btn:hover {
+  background-color: #1976d2;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(33, 150, 243, 0.2);
+}
+
+.ai-icon {
+  font-size: 16px;
 }
 
 .lecture-container {
   display: flex;
-  height: 100%;
-  max-width: 1400px;
-  margin: 0 auto;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  flex: 1;
   overflow: hidden;
+  padding: 0px;
+  gap: 10px;
 }
 
-/* Sidebar */
 .lecture-sidebar {
-  width: 240px;
-  border-right: 1px solid #e6e6e6;
+  width: 250px;
+  border-right: 1px solid rgba(224, 224, 224, 0.5);
+  background-color: rgba(255, 255, 255, 0.7);
   display: flex;
   flex-direction: column;
-  background: #f8f9fa;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
 }
 
 .sidebar-header {
-  padding: 16px;
+  padding: 20px;
+  border-bottom: 1px solid rgba(224, 224, 224, 0.5);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: #f0f2f5;
-  flex-shrink: 0;
+  border-radius: 12px 12px 0 0;
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+.add-chapter-btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background-color: #2196f3;
+  color: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  transition: all 0.3s ease;
+}
+
+.add-chapter-btn:hover {
+  background-color: #1976d2;
 }
 
 .chapter-list {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 0;
+  padding: 12px;
 }
 
 .chapter-item {
-  margin: 4px 10px;
-  border-radius: 6px;
-  overflow: hidden;
-  cursor: pointer;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  background-color: rgba(248, 249, 250, 0.7);
   transition: all 0.3s ease;
-  border: 1px solid #ebeef5;
-  background-color: #fff;
+  border: 1px solid transparent;
 }
 
 .chapter-item:hover {
-  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  background-color: rgba(227, 242, 253, 0.7);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(92, 105, 116, 0.1);
 }
 
 .chapter-item.active {
-  border-color: #409eff;
-  box-shadow: 0 0 0 1px #409eff;
+  background-color: rgba(227, 242, 253, 0.9);
+  border: 1px solid rgba(33, 150, 243, 0.3);
+  box-shadow: 0 4px 12px rgba(33, 150, 243, 0.1);
 }
 
 .chapter-item-content {
+  padding: 12px;
   display: flex;
   align-items: center;
-  padding: 12px 15px;
-  position: relative;
-}
-
-.drag-handle {
-  margin-right: 8px;
-  color: #c0c4cc;
-  cursor: move;
-  font-size: 16px;
-}
-
-.drag-handle:hover {
-  color: #409eff;
+  gap: 8px;
 }
 
 .chapter-title {
   flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 14px;
-  color: #303133;
+  font-weight: 500;
 }
 
 .chapter-actions {
-  margin-left: 8px;
   opacity: 0;
-  transition: opacity 0.3s;
+  transition: opacity 0.3s ease;
 }
 
 .chapter-item:hover .chapter-actions {
@@ -629,302 +628,217 @@ export default {
 }
 
 .chapter-progress {
-  height: 4px;
-  font-size: 0;
-  transition: all 0.3s;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #666;
+  border-top: 1px solid #eee;
 }
 
 .status-empty {
-  background-color: #f56c6c;
+  color: #f44336;  /* 红色表示未生成 */
+  background-color: rgba(244, 67, 54, 0.1);
 }
 
 .status-draft {
-  background-color: #e6a23c;
+  color: #fb8c00;  /* 黄色表示未确认/未发布 */
+  background-color: rgba(251, 140, 0, 0.1);
 }
 
 .status-published {
-  background-color: #67c23a;
+  color: #4caf50;  /* 绿色表示已发布 */
+  background-color: rgba(76, 175, 80, 0.1);
 }
 
 .lecture-content {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  padding: 20px;
+  overflow-y: auto;
+  background-color: rgba(255, 255, 255, 0.7);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
 }
 
 .editor-header {
-  padding: 15px 25px;
-  border-bottom: 1px solid #e6e6e6;
+  margin-bottom: 20px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: #fff;
-  flex-shrink: 0;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  gap: 20px;
+  padding: 20px;
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.9);
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   flex: 1;
-  max-width: 70%;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 
 .chapter-title-input {
-  flex: 1;
-  max-width: 400px;
+  width: 100%;
+  max-width: 700px;
 }
 
-.chapter-title-input :deep(.el-input__wrapper) {
-  border-radius: 4px;
-  border: 1px solid #dcdfe6;
-  transition: border-color 0.3s;
+.button-group {
+  display: flex;
+  gap: 1px;
+  background-color: #e0e0e0;
+  border-radius: 8px;
+  padding: 1px;
 }
 
-.chapter-title-input :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px #409eff;
-  border-color: #409eff;
+.mode-btn {
+  padding: 8px 16px;
+  border: none;
+  background-color: #fff;
+  cursor: pointer;
+  transition: all 0.3s ease;
 }
 
-.generate-btn {
-  white-space: nowrap;
+.mode-btn:first-child {
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+
+.mode-btn:last-child {
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+.mode-btn.active {
+  background-color: #2196f3;
+  color: white;
+}
+
+.publish-btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  background-color: #4caf50;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.3s ease;
+}
+
+.publish-btn:hover {
+  background-color: #388e3c;
+}
+
+.publish-btn:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
 }
 
 .editor-container {
-  flex: 1;
-  padding: 0;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
 .markdown-editor {
-  flex: 1;
-  padding: 20px;
-  overflow-y: auto;
-}
-
-.markdown-editor :deep(.el-textarea__inner) {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  line-height: 1.6;
-  font-size: 14px;
-  border: none;
-  resize: none;
-  box-shadow: none;
-  padding: 15px;
-  min-height: 100% !important;
+  height: calc(100vh - 300px);
 }
 
 .markdown-preview {
-  flex: 1;
-  padding: 25px 30px;
+  padding: 20px;
+  height: calc(100vh - 300px);
   overflow-y: auto;
-  background-color: #fff;
-  line-height: 1.7;
-  color: #24292e;
 }
 
-/* Markdown 样式 */
-.markdown-preview :deep(h1) {
-  margin: 0.67em 0 0.5em;
-  padding-bottom: 0.3em;
-  font-size: 2em;
-  border-bottom: 1px solid #eaecef;
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-.markdown-preview :deep(h2) {
-  margin: 1.2em 0 0.8em;
-  padding-bottom: 0.3em;
-  font-size: 1.5em;
-  border-bottom: 1px solid #eaecef;
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-.markdown-preview :deep(h3) {
-  margin: 1em 0 0.6em;
-  font-size: 1.25em;
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-.markdown-preview :deep(p) {
-  margin: 0 0 16px 0;
-  line-height: 1.7;
-}
-
-.markdown-preview :deep(ul),
-.markdown-preview :deep(ol) {
-  padding-left: 2em;
-  margin-bottom: 16px;
-}
-
-.markdown-preview :deep(li) {
-  margin-bottom: 0.25em;
-}
-
-.markdown-preview :deep(blockquote) {
-  margin: 0 0 16px 0;
-  padding: 0 1em;
-  color: #6a737d;
-  border-left: 0.25em solid #dfe2e5;
-  background-color: #f6f8fa;
-  border-radius: 4px;
-  padding: 10px 15px;
-}
-
-.markdown-preview :deep(pre) {
-  background-color: #f6f8fa;
-  border-radius: 6px;
-  padding: 16px;
-  overflow: auto;
-  margin-bottom: 16px;
-  line-height: 1.45;
-}
-
-.markdown-preview :deep(code) {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  padding: 0.2em 0.4em;
-  margin: 0;
-  font-size: 85%;
-  background-color: rgba(27, 31, 35, 0.05);
-  border-radius: 3px;
-}
-
-.markdown-preview :deep(pre code) {
-  background-color: transparent;
-  padding: 0;
-  border-radius: 0;
-  font-size: 100%;
-}
-
-.markdown-preview :deep(table) {
-  border-collapse: collapse;
-  width: 100%;
-  margin-bottom: 16px;
-  display: block;
-  overflow: auto;
-}
-
-.markdown-preview :deep(th),
-.markdown-preview :deep(td) {
-  padding: 6px 13px;
-  border: 1px solid #dfe2e5;
-}
-
-.markdown-preview :deep(tr) {
-  background-color: #fff;
-  border-top: 1px solid #c6cbd1;
-}
-
-.markdown-preview :deep(tr:nth-child(2n)) {
-  background-color: #f6f8fa;
-}
-
-.markdown-preview :deep(img) {
-  max-width: 100%;
-  box-sizing: content-box;
-  background-color: #fff;
-}
-
-.markdown-preview :deep(a) {
-  color: #0366d6;
-  text-decoration: none;
-}
-
-.markdown-preview :deep(a:hover) {
-  text-decoration: underline;
-}
-
-/* 空状态 */
-.no-chapter-selected {
+/* 状态消息样式 */
+.status-message {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 12px 20px;
+  border-radius: 8px;
   display: flex;
-  justify-content: center;
   align-items: center;
-  height: 100%;
-  color: #909399;
-  flex-direction: column;
-  padding: 40px 0;
+  gap: 10px;
+  z-index: 1000;
+  animation: slideIn 0.3s ease-out;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-.no-chapter-selected :deep(.el-empty__description) {
-  margin: 20px 0 0 0;
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
-/* 响应式调整 */
+.loading, .generating, .saving {
+  background-color: #f8f9fa;
+  border-left: 4px solid #2196f3;
+}
+
+.success {
+  background-color: #e8f5e9;
+  border-left: 4px solid #4caf50;
+}
+
+.error {
+  background-color: #ffebee;
+  border-left: 4px solid #f44336;
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #2196f3;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.success-icon {
+  color: #4caf50;
+  font-weight: bold;
+}
+
+.error-icon {
+  color: #f44336;
+}
+
+/* 响应式设计 */
 @media (max-width: 992px) {
   .lecture-container {
     flex-direction: column;
-    height: auto;
-    max-height: 90vh;
   }
   
   .lecture-sidebar {
     width: 100%;
     height: 300px;
-    border-right: none;
-    border-bottom: 1px solid #e6e6e6;
   }
   
-  .header-left {
+  .editor-header {
     flex-direction: column;
     align-items: flex-start;
-    gap: 10px;
   }
   
   .header-right {
-    flex-wrap: wrap;
+    width: 100%;
     justify-content: flex-end;
   }
-}
-
-/* 滚动条样式 */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-thumb {
-  background-color: #c1c1c1;
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background-color: #a8a8a8;
-}
-
-::-webkit-scrollbar-track {
-  background-color: #f1f1f1;
-}
-
-/* 动画效果 */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.chapter-item {
-  animation: fadeIn 0.3s ease-out forwards;
-}
-
-/* 过渡效果 */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
+  
+  .chapter-title-input {
+    width: 100%;
+  }
 }
 </style>

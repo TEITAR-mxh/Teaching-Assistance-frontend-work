@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import * as authApi from '@/hooks/api/auth'
+import * as authApi from '@/hooks/api/auth' 
 import Header from '@/components/Header.vue'
 import CourseManage from '@/components/CourseManage.vue'
 import FunctionSelect from '@/components/FunctionSelect.vue'
@@ -170,48 +170,80 @@ const hideCourseInfoPanel = () => {
 
 // 显示课程模块内容
 const showModule = (moduleId: string | { component: string, props?: any }) => {
+  console.log('showModule 调用，参数:', moduleId)
+
   // 如果是对象，说明传入了组件和props
   if (typeof moduleId === 'object' && moduleId !== null) {
+    console.log('正在处理组件类型:', moduleId.component)
     if (moduleId.component === 'TeachingLecture') {
-      showTeachingLecture.value = true
+      console.log('正在切换到TeachingLecture模块')
+      // 确保先隐藏其他组件
       showCourseOutline.value = false
       showCourseDescription.value = false
       showCourseInfo.value = false
+      showFunctionSelect.value = false // 确保隐藏功能选择界面
+
+      // 设置TeachingLecture显示状态
+      showTeachingLecture.value = true
+      
       // 可以在这里处理props
       if (moduleId.props) {
-        // 更新selectedModuleId
+        console.log('设置TeachingLecture属性:', moduleId.props)
         selectedModuleId.value = 'lecture'
       }
+
+      // 打印当前组件显示状态
+      console.log('组件显示状态:', {
+        teachingLecture: showTeachingLecture.value,
+        functionSelect: showFunctionSelect.value,
+        courseInfo: showCourseInfo.value,
+        courseDescription: showCourseDescription.value,
+        courseOutline: showCourseOutline.value
+      })
     }
     return
   }
   
   // 处理字符串类型的moduleId
+  console.log('正在处理字符串类型moduleId:', moduleId)
   selectedModuleId.value = moduleId as string
+
+  // 确保先隐藏所有组件
+  showCourseDescription.value = false
+  showCourseInfo.value = false
+  showCourseOutline.value = false
+  showTeachingLecture.value = false
+  showFunctionSelect.value = false
+
   if (moduleId === 'basic') {
+    console.log('显示课程介绍')
     showCourseDescription.value = true
-    showCourseInfo.value = false
-    showCourseOutline.value = false
-    showTeachingLecture.value = false
   } else if (moduleId === 'outline') {
+    console.log('显示课程大纲')
     showCourseOutline.value = true
-    showCourseDescription.value = false
-    showCourseInfo.value = false
-    showTeachingLecture.value = false
   } else if (moduleId === 'lecture') {
+    console.log('显示教学讲义')
     showTeachingLecture.value = true
-    showCourseOutline.value = false
-    showCourseDescription.value = false
-    showCourseInfo.value = false
   }
-  // 其他模块的处理可以在这里添加
+
+  // 打印当前组件显示状态
+  console.log('组件显示状态:', {
+    teachingLecture: showTeachingLecture.value,
+    functionSelect: showFunctionSelect.value,
+    courseInfo: showCourseInfo.value,
+    courseDescription: showCourseDescription.value,
+    courseOutline: showCourseOutline.value
+  })
 }
 
 // 返回功能选择
-const backToFunctionSelect = () => {
-  showCourseDescription.value = false
-  showCourseOutline.value = false
-  showTeachingLecture.value = false
+const backToFunctionSelect = (showTeaching = false) => {
+  showCourseDescription.value = false;
+  showCourseOutline.value = false;
+  // 如果 showTeaching 为 true，则显示 TeachingLecture 组件
+  showTeachingLecture.value = showTeaching;
+  // 如果不显示 TeachingLecture，则显示功能选择
+  showFunctionSelect.value = !showTeaching;
 }
 
 </script>
@@ -222,9 +254,21 @@ const backToFunctionSelect = () => {
     
     <div v-if="isLoggedIn" class="content-area">
       <!-- 根据当前状态显示课程管理、功能选择或课程信息 -->
-      <CourseManage v-if="!showFunctionSelect && !showCourseInfo && !showCourseDescription && !showCourseOutline && !showTeachingLecture" @course-selected="openFunctionSelect" />
+      <!-- 优先级最高：TeachingLecture -->
+      <TeachingLecture
+        v-if="showTeachingLecture"
+        :courseId="selectedCourseId"
+        :courseName="selectedCourseTitle"
+        :showEditor="selectedModuleId === 'lecture'"
+        @back="() => backToFunctionSelect(false)"
+      />
+      <!-- 其他组件按照原有的条件显示 -->
+      <CourseManage 
+        v-else-if="!showFunctionSelect && !showCourseInfo && !showCourseDescription && !showCourseOutline" 
+        @course-selected="openFunctionSelect" 
+      />
       <FunctionSelect 
-        v-else-if="showFunctionSelect && !showCourseInfo && !showCourseDescription && !showCourseOutline && !showTeachingLecture" 
+        v-else-if="showFunctionSelect" 
         :courseTitle="selectedCourseTitle" 
         :courseId="selectedCourseId"
         @back="backToCourseManage"
@@ -243,13 +287,6 @@ const backToFunctionSelect = () => {
       <CourseOutline
         v-else-if="showCourseOutline"
         :courseId="selectedCourseId"
-        @back="backToFunctionSelect"
-      />
-      <TeachingLecture
-        v-else-if="showTeachingLecture"
-        :courseId="selectedCourseId"
-        :courseName="selectedCourseTitle"
-        :showEditor="selectedModuleId === 'lecture'"
         @back="backToFunctionSelect"
       />
     </div>

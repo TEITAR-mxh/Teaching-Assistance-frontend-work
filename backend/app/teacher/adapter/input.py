@@ -43,8 +43,11 @@ async def generate_course_objective(course_id: int, request: GenerateRequest, se
 async def save_course_objective(course_id: int, request: CourseObjectiveRequest, service = Depends(get_teacher_service)):
     try:
         return await service.save_course_objective(course_id, request)
+    except ValueError as e:
+        logger.error(f"保存课程教学目标失败 - 业务逻辑错误: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"保存课程教学目标失败: {e}")
+        logger.error(f"保存课程教学目标失败 - 系统错误: {e}")
         raise HTTPException(status_code=500, detail="保存课程教学目标失败")
 
 # 课程大纲相关接口
@@ -57,17 +60,29 @@ async def get_course_syllabus(course_id: int, service = Depends(get_teacher_serv
         raise HTTPException(status_code=500, detail="获取课程大纲失败")
 
 @router.post("/syllabus/{course_id}/generate")
-async def generate_course_syllabus(course_id: int, request: GenerateRequest, service = Depends(get_teacher_service)):
+async def generate_course_syllabus(course_id: int, request: dict, service = Depends(get_teacher_service)):
     try:
-        return await service.generate_course_syllabus(course_id, request)
+        # 从请求中提取 prompt，支持多种格式
+        prompt = request.get("request") or request.get("prompt") or request.get("courseTitle", "")
+        if not prompt:
+            raise HTTPException(status_code=400, detail="缺少必要的生成参数")
+        return await service.generate_course_syllabus(course_id, GenerateRequest(prompt=prompt))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"生成课程大纲失败: {e}")
         raise HTTPException(status_code=500, detail="生成课程大纲失败")
 
 @router.post("/syllabus/{course_id}/save")
-async def save_course_syllabus(course_id: int, request: CourseSyllabusRequest, service = Depends(get_teacher_service)):
+async def save_course_syllabus(course_id: int, request: dict, service = Depends(get_teacher_service)):
     try:
-        return await service.save_course_syllabus(course_id, request)
+        # 从请求中提取 content，支持多种格式
+        content = request.get("content") or request.get("material") or request.get("syllabus", "")
+        if not content:
+            raise HTTPException(status_code=400, detail="缺少必要的保存内容")
+        return await service.save_course_syllabus(course_id, CourseSyllabusRequest(content=content))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"保存课程大纲失败: {e}")
         raise HTTPException(status_code=500, detail="保存课程大纲失败")
@@ -82,17 +97,29 @@ async def get_course_material(course_id: int, service = Depends(get_teacher_serv
         raise HTTPException(status_code=500, detail="获取课程讲义失败")
 
 @router.post("/material/{course_id}/generate")
-async def generate_course_material(course_id: int, request: GenerateRequest, service = Depends(get_teacher_service)):
+async def generate_course_material(course_id: int, request: dict, service = Depends(get_teacher_service)):
     try:
-        return await service.generate_course_material(course_id, request)
+        # 从请求中提取 prompt，支持多种格式
+        prompt = request.get("request") or request.get("prompt") or request.get("courseTitle", "")
+        if not prompt:
+            raise HTTPException(status_code=400, detail="缺少必要的生成参数")
+        return await service.generate_course_material(course_id, GenerateRequest(prompt=prompt))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"生成课程讲义失败: {e}")
         raise HTTPException(status_code=500, detail="生成课程讲义失败")
 
 @router.post("/material/{course_id}/save")
-async def save_course_material(course_id: int, request: CourseMaterialRequest, service = Depends(get_teacher_service)):
+async def save_course_material(course_id: int, request: dict, service = Depends(get_teacher_service)):
     try:
-        return await service.save_course_material(course_id, request)
+        # 从请求中提取 content，支持多种格式
+        content = request.get("content") or request.get("material") or request.get("syllabus", "")
+        if not content:
+            raise HTTPException(status_code=400, detail="缺少必要的保存内容")
+        return await service.save_course_material(course_id, CourseMaterialRequest(content=content))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"保存课程讲义失败: {e}")
         raise HTTPException(status_code=500, detail="保存课程讲义失败") 

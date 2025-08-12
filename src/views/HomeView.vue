@@ -43,7 +43,23 @@ const restoreState = () => {
     return
   }
   
-  // 否则按照正常逻辑恢复状态
+  // 优先恢复TeachingLecture模块状态（如果存在）
+  if (storedShowTeachingLecture === 'true' && storedCourseId && storedCourseTitle) {
+    console.log('恢复TeachingLecture模块状态')
+    showTeachingLecture.value = true
+    selectedCourseId.value = parseInt(storedCourseId)
+    selectedCourseTitle.value = storedCourseTitle
+    selectedModuleId.value = 'lecture'
+    
+    // 确保其他组件隐藏
+    showFunctionSelect.value = false
+    showCourseInfo.value = false
+    showCourseDescription.value = false
+    showCourseOutline.value = false
+    return
+  }
+  
+  // 恢复其他模块状态
   if (storedShowFunctionSelect === 'true' && storedCourseTitle) {
     showFunctionSelect.value = true
     selectedCourseTitle.value = storedCourseTitle
@@ -56,17 +72,15 @@ const restoreState = () => {
     showCourseInfo.value = true
   }
 
-  if (storedShowCourseDescription === 'true' && storedModuleId) {
+  if (storedShowCourseDescription === 'true' && storedModuleId && storedCourseId) {
     showCourseDescription.value = true
     selectedModuleId.value = storedModuleId
+    selectedCourseId.value = parseInt(storedCourseId)
   }
   
-  if (storedShowCourseOutline === 'true') {
+  if (storedShowCourseOutline === 'true' && storedCourseId) {
     showCourseOutline.value = true
-  }
-  
-  if (storedShowTeachingLecture === 'true') {
-    showTeachingLecture.value = true
+    selectedCourseId.value = parseInt(storedCourseId)
   }
 }
 
@@ -177,6 +191,7 @@ const showModule = (moduleId: string | { component: string, props?: any }) => {
     console.log('正在处理组件类型:', moduleId.component)
     if (moduleId.component === 'TeachingLecture') {
       console.log('正在切换到TeachingLecture模块')
+      
       // 确保先隐藏其他组件
       showCourseOutline.value = false
       showCourseDescription.value = false
@@ -186,10 +201,33 @@ const showModule = (moduleId: string | { component: string, props?: any }) => {
       // 设置TeachingLecture显示状态
       showTeachingLecture.value = true
       
-      // 可以在这里处理props
+      // 处理props
       if (moduleId.props) {
         console.log('设置TeachingLecture属性:', moduleId.props)
         selectedModuleId.value = 'lecture'
+        
+        // 保存课程信息到多个存储位置，确保刷新后能恢复
+        if (moduleId.props.courseId) {
+          selectedCourseId.value = moduleId.props.courseId
+          localStorage.setItem('selectedCourseId', moduleId.props.courseId.toString())
+          sessionStorage.setItem('selectedCourseId', moduleId.props.courseId.toString())
+        }
+        
+        if (moduleId.props.courseName) {
+          selectedCourseTitle.value = moduleId.props.courseName
+          localStorage.setItem('selectedCourseTitle', moduleId.props.courseName)
+          sessionStorage.setItem('selectedCourseTitle', moduleId.props.courseName)
+        }
+        
+        // 保存模块状态
+        localStorage.setItem('showTeachingLecture', 'true')
+        sessionStorage.setItem('showTeachingLecture', 'true')
+        
+        // 如果指定了showEditor，也保存这个状态
+        if (moduleId.props.showEditor !== undefined) {
+          localStorage.setItem('showTeachingLectureEditor', moduleId.props.showEditor.toString())
+          sessionStorage.setItem('showTeachingLectureEditor', moduleId.props.showEditor.toString())
+        }
       }
 
       // 打印当前组件显示状态
@@ -224,6 +262,10 @@ const showModule = (moduleId: string | { component: string, props?: any }) => {
   } else if (moduleId === 'lecture') {
     console.log('显示教学讲义')
     showTeachingLecture.value = true
+    
+    // 保存讲义模块状态
+    localStorage.setItem('showTeachingLecture', 'true')
+    sessionStorage.setItem('showTeachingLecture', 'true')
   }
 
   // 打印当前组件显示状态

@@ -17,7 +17,15 @@ class TeacherService:
                 "created_at": obj.created_at,
                 "updated_at": obj.updated_at
             }
-        return {}
+        # 返回符合响应模型的空结构，避免响应校验错误
+        return {
+            "id": 0,
+            "course_id": course_id,
+            "course_content": "",
+            "teaching_target": "",
+            "created_at": None,
+            "updated_at": None,
+        }
     
     async def generate_course_objective(self, course_id: int, request: GenerateRequest):
         """生成课程教学目标（模拟）"""
@@ -25,16 +33,23 @@ class TeacherService:
         generated_content = f"基于提示 '{request.prompt}' 生成的课程教学目标内容..."
         return await self.repo.save_course_objective(course_id, generated_content)
     
-    async def save_course_objective(self, course_id: int, request):
-        obj = await self.repo.save_course_objective(course_id, request.course_content, request.teaching_target)
-        return {
-            "id": obj.id,
-            "course_id": obj.course_id,
-            "course_content": obj.course_content,
-            "teaching_target": obj.teaching_target,
-            "created_at": obj.created_at,
-            "updated_at": obj.updated_at
-        }
+    async def save_course_objective(self, course_id: int, request: CourseObjectiveRequest):
+        try:
+            obj = await self.repo.save_course_objective(course_id, request.course_content, request.teaching_target)
+            return {
+                "id": obj.id,
+                "course_id": obj.course_id,
+                "course_content": obj.course_content,
+                "teaching_target": obj.teaching_target,
+                "created_at": obj.created_at,
+                "updated_at": obj.updated_at
+            }
+        except ValueError as e:
+            # 课程不存在等业务逻辑错误
+            raise ValueError(str(e))
+        except Exception as e:
+            # 数据库错误等其他异常
+            raise Exception(f"保存课程目标失败: {str(e)}")
     
     async def get_course_syllabus(self, course_id: int):
         """获取课程大纲"""

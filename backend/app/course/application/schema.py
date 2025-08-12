@@ -7,7 +7,7 @@ class CourseBase(BaseModel):
     description: Optional[str] = None
 
 class CourseCreate(CourseBase):
-    teacher_id: int
+    teacher_id: Optional[int] = None
 
 class CourseUpdate(BaseModel):
     title: Optional[str] = None

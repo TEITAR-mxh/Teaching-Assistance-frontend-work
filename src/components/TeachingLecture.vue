@@ -11,7 +11,7 @@
           </button>
           <button class="save-btn" @click="handleSave" :disabled="isSaving">保存</button>
         </template>
-        <button v-else class="back-to-lecture" @click="showEditor = false">
+        <button v-else class="back-to-lecture" @click="handleGenerateLectureFromEditor">
           生成讲义
         </button>
       </div>
@@ -43,11 +43,29 @@
       <span>{{ error }}</span>
     </div>
 
+    <!-- 讲义编辑器视图上方的状态区保留加载/保存等必要提示，调试条已注释 -->
+    
+    <!-- 自动保存状态提示（调试用，已注释） -->
+    <!--
+    <div v-if="autoSaveEnabled" class="auto-save-indicator">
+      <span class="auto-save-icon">🔄</span>
+      <span>自动保存已启用 (每5分钟)</span>
+    </div>
+    -->
+
+    <!-- 内容状态提示（调试用，已注释） -->
+    <!--
+    <div v-if="contentStatus" class="content-status-indicator" :class="contentStatus.type">
+      <span class="status-icon">{{ contentStatus.icon }}</span>
+      <span>{{ contentStatus.message }}</span>
+    </div>
+    -->
+
     <!-- 讲义编辑器视图 -->
     <div v-if="showEditor" class="lecture-editor-container">
       <LectureEditor 
         :course-id="courseId"
-        @back="showEditor = false"
+        @back="handleEditorBack"
       />
     </div>
     
@@ -55,12 +73,37 @@
     <div v-else class="content-container">
       <!-- 左侧目录 -->
       <div class="catalog-panel" :class="{ 'collapsed': !catalogExpanded }">
-        <Catalog 
-          :content="markdownContent" 
-          :activeHeading="activeHeading" 
-          @navigate="scrollToHeading"
-          @toggle="handleCatalogToggle"
-        />
+        <div class="catalog-header">
+          <h3>目录</h3>
+          <button class="catalog-toggle-btn" @click="handleCatalogToggle(!catalogExpanded)">
+            {{ catalogExpanded ? '收起' : '展开' }}
+          </button>
+        </div>
+        
+        <!-- 章节目录 -->
+        <div v-if="chapters.length > 0" class="chapters-catalog">
+          <div 
+            v-for="chapter in chapters" 
+            :key="chapter.id"
+            class="chapter-catalog-item"
+            :class="{ 'active': activeHeading === chapter.title }"
+            @click="scrollToChapter(chapter.title)"
+          >
+            <div class="chapter-catalog-title">{{ chapter.title }}</div>
+            <div class="chapter-catalog-status" :class="`status-${chapter.status}`">
+              {{ getChapterStatusText(chapter.status) }}
+            </div>
+          </div>
+        </div>
+        
+        <!-- 空状态 -->
+        <div v-else class="catalog-empty">
+          <div class="catalog-empty-icon">📚</div>
+          <div class="catalog-empty-text">暂无章节</div>
+          <button class="create-chapter-btn" @click="showEditor = true">
+            创建章节
+          </button>
+        </div>
       </div>
       
       <!-- 右侧编辑器 -->
@@ -100,6 +143,7 @@ import Catalog from './Catalog.vue';
 import AiPromptDialog from './AiPromptDialog.vue'; // Changed from Prompt to AiPromptDialog
 import { getCourseMaterial, saveCourseMaterial, generateCourseMaterial } from '../api/functions';
 import LectureEditor from './LectureEditor.vue';
+import { getChaptersByCourse } from '../api/lecture';
 
 // 定义API响应类型（已注释，未使用）
 // interface ApiResponse<T = any> {
@@ -161,6 +205,17 @@ const showSuccessMessage = ref(false);
 const successMessage = ref('');
 const error = ref('');
 
+// 自动保存相关
+const autoSaveEnabled = ref(true);
+const lastAutoSave = ref<Date | null>(null);
+
+// 内容状态
+const contentStatus = ref<{
+  type: 'success' | 'error' | 'info';
+  icon: string;
+  message: string;
+} | null>(null);
+
 // 控制Prompt组件显示
 const showPrompt = ref(false);
 const selectedText = ref('');
@@ -170,6 +225,10 @@ const aiGeneratedContent = ref('');
 
 // 目录展开状态
 const catalogExpanded = ref(true);
+
+// 是否显示状态（讲义查看模式默认不显示）
+const showStatusInMerged = ref(false);
+const showStatusBadge = ref(false);
 
 // 处理目录折叠/展开
 const handleCatalogToggle = (expanded: boolean) => {
@@ -226,8 +285,10 @@ const handleGenerateLecture = async (requirements: string) => { // Renamed from 
   }
 };
 
-// 示例讲义内容
+// 讲义内容相关
 const markdownContent = ref('');
+const chapters = ref<any[]>([]);
+const mergedContent = ref('');
 
 // 是否显示编辑器
 const showEditor = ref(props.showEditor);
@@ -239,13 +300,205 @@ watch(() => props.showEditor, (newVal: boolean) => {
   }
 });
 
+// 当从编辑器返回时，加载合并的讲义内容
+const handleEditorBack = async () => {
+  showEditor.value = false;
+  await loadMergedLectureContent();
+};
+
+// 加载合并的讲义内容
+const loadMergedLectureContent = async () => {
+  if (!props.courseId) {
+    console.warn('loadMergedLectureContent: 无效的课程ID');
+    return;
+  }
+  
+  console.log('开始加载合并的讲义内容，courseId:', props.courseId);
+  isLoading.value = true;
+  loadingMessage.value = '正在加载合并的讲义内容...';
+  
+  try {
+    // 1. 首先尝试从API获取章节数据
+    console.log('正在调用getChaptersByCourse API...');
+    const courseChapters = await getChaptersByCourse(props.courseId);
+    console.log('API返回的章节数据:', courseChapters);
+    
+    if (courseChapters && Array.isArray(courseChapters) && courseChapters.length > 0) {
+      chapters.value = courseChapters;
+      console.log('成功加载章节数据，章节数量:', chapters.value.length);
+      console.log('章节详情:', chapters.value);
+      
+      // 2. 合并所有章节内容
+      const merged = mergeChaptersContent(courseChapters);
+      console.log('合并后的内容长度:', merged.length);
+      console.log('合并后的内容预览:', merged.substring(0, 200) + '...');
+      
+      mergedContent.value = merged;
+      markdownContent.value = merged;
+      
+      // 3. 更新内容状态
+      if (merged && merged.trim()) {
+        contentStatus.value = {
+          type: 'success',
+          icon: '📚',
+          message: `已加载 ${chapters.value.length} 个章节，总内容 ${merged.length} 字符`
+        };
+        console.log('内容状态已更新为成功');
+      } else {
+        contentStatus.value = {
+          type: 'info',
+          icon: '📄',
+          message: '讲义内容为空，请先在编辑器中创建章节'
+        };
+        console.log('内容状态已更新为信息');
+      }
+      
+      // 4. 保存到本地存储
+      localStorage.setItem(`merged_lecture_${props.courseId}`, merged);
+      localStorage.setItem(`chapters_data_${props.courseId}`, JSON.stringify(courseChapters));
+      console.log('数据已保存到本地存储');
+      
+    } else {
+      console.warn('API返回的章节数据无效或为空:', courseChapters);
+      
+      // 如果API失败，尝试从本地存储加载
+      const localMerged = localStorage.getItem(`merged_lecture_${props.courseId}`);
+      const localChapters = localStorage.getItem(`chapters_data_${props.courseId}`);
+      
+      if (localMerged && localChapters) {
+        try {
+          chapters.value = JSON.parse(localChapters);
+          mergedContent.value = localMerged;
+          markdownContent.value = localMerged;
+          
+          contentStatus.value = {
+            type: 'info',
+            icon: '💾',
+            message: `从本地加载了 ${chapters.value.length} 个章节`
+          };
+          console.log('从本地存储成功加载数据');
+        } catch (e) {
+          console.warn('解析本地数据失败:', e);
+          createDefaultContent();
+        }
+      } else {
+        console.log('本地存储也没有数据，创建默认内容');
+        createDefaultContent();
+      }
+    }
+    
+  } catch (err) {
+    console.error('加载合并讲义内容失败:', err);
+    
+    // 尝试从本地存储加载
+    const localMerged = localStorage.getItem(`merged_lecture_${props.courseId}`);
+    if (localMerged) {
+      markdownContent.value = localMerged;
+      contentStatus.value = {
+        type: 'warning',
+        icon: '⚠️',
+        message: 'API加载失败，使用本地缓存内容'
+      };
+      console.log('API失败，使用本地缓存内容');
+    } else {
+      console.log('本地缓存也没有内容，创建默认内容');
+      createDefaultContent();
+    }
+  } finally {
+    isLoading.value = false;
+    console.log('loadMergedLectureContent 完成，最终状态:', {
+      chaptersCount: chapters.value.length,
+      contentLength: markdownContent.value.length,
+      contentStatus: contentStatus.value
+    });
+  }
+};
+
+// 合并章节内容
+const mergeChaptersContent = (chapters: any[]): string => {
+  console.log('开始合并章节内容，输入章节数量:', chapters.length);
+  
+  if (!chapters || chapters.length === 0) {
+    console.warn('没有章节数据，返回空字符串');
+    return '';
+  }
+  
+  // 按order_index排序
+  const sortedChapters = [...chapters].sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+  console.log('排序后的章节:', sortedChapters.map(c => ({ id: c.id, title: c.title, order_index: c.order_index })));
+  
+  let merged = '';
+  
+  sortedChapters.forEach((chapter, index) => {
+    console.log(`处理第 ${index + 1} 个章节:`, { id: chapter.id, title: chapter.title, contentLength: chapter.content?.length || 0 });
+    
+    if (index > 0) {
+      merged += '\n\n---\n\n'; // 章节分隔符
+    }
+    
+    // 添加章节标题
+    merged += `# ${chapter.title}\n\n`;
+    
+    // 添加章节内容
+    if (chapter.content && chapter.content.trim()) {
+      merged += chapter.content;
+      console.log(`章节 "${chapter.title}" 内容已添加，长度: ${chapter.content.length}`);
+    } else {
+      const placeholder = `*${chapter.title} 的内容尚未编写，请点击\"讲义编辑器\"进行编辑。*`;
+      merged += placeholder;
+      console.log(`章节 "${chapter.title}" 使用占位符内容`);
+    }
+    
+    // 可选：添加章节状态信息（默认关闭）
+    if (showStatusInMerged.value) {
+      const statusText = getChapterStatusText(chapter.status);
+      merged += `\n\n*状态: ${statusText}*`;
+      console.log(`章节 "${chapter.title}" 状态: ${statusText}`);
+    }
+  });
+  
+  console.log('章节合并完成，最终内容长度:', merged.length);
+  console.log('最终内容预览:', merged.substring(0, 300) + '...');
+  
+  return merged;
+};
+
+// 获取章节状态文本
+const getChapterStatusText = (status: string): string => {
+  const statusMap = {
+    'empty': '未开始',
+    'draft': '草稿',
+    'published': '已发布'
+  };
+  return statusMap[status as keyof typeof statusMap] || '未知';
+};
+
+// 创建默认内容（去除状态行）
+const createDefaultContent = () => {
+  chapters.value = [{
+    id: 1,
+    title: '课程介绍',
+    content: '',
+    status: 'empty',
+    order_index: 0
+  }];
+  
+  const defaultContent = `# 课程介绍\n\n*课程介绍的内容尚未编写，请点击\"讲义编辑器\"进行编辑。*\n\n---\n## 课程大纲\n\n*课程大纲的内容尚未编写，请点击\"讲义编辑器\"进行编辑。*\n\n---\n## 教学讲义\n\n*教学讲义的内容尚未编写，请点击\"讲义编辑器\"进行编辑。*`;
+  
+  mergedContent.value = defaultContent;
+  markdownContent.value = defaultContent;
+  
+  contentStatus.value = {
+    type: 'info',
+    icon: '📝',
+    message: '已创建默认讲义结构，请点击"讲义编辑器"进行编辑'
+  };
+};
+
 // 处理返回按钮
 const handleBack = () => {
-  if (showEditor.value) {
-    showEditor.value = false;
-  } else {
-    emit('back');
-  }
+  // 统一行为：返回上一层（课程功能选择/上一页）
+  emit('back');
 };
 
 // 当前活跃的标题锚点
@@ -270,37 +523,113 @@ const updateContent = (content: string) => {
 
 // 获取课程讲义
 const fetchCourseMaterial = async () => {
-  if (!props.courseId) return;
+  if (!props.courseId) {
+    console.warn('fetchCourseMaterial: 无效的课程ID');
+    return;
+  }
   
   isLoading.value = true;
   loadingMessage.value = '正在加载讲义内容...';
+  error.value = ''; // 清除之前的错误
   
   try {
     // 确保courseId是数字类型
     const courseId = typeof props.courseId === 'string' ? parseInt(props.courseId, 10) : props.courseId;
+    
+    if (isNaN(courseId) || courseId <= 0) {
+      throw new Error('无效的课程ID');
+    }
+    
+    console.log('开始获取讲义内容，courseId:', courseId);
+    
+    // 首先尝试从localStorage获取缓存内容
+    const cachedContent = localStorage.getItem(`lecture_content_${courseId}`);
+    const lastSaved = localStorage.getItem(`lecture_last_saved_${courseId}`);
+    
+    if (cachedContent && lastSaved) {
+      const lastSavedTime = new Date(lastSaved);
+      const now = new Date();
+      const timeDiff = now.getTime() - lastSavedTime.getTime();
+      const hoursDiff = timeDiff / (1000 * 60 * 60);
+      
+      // 如果缓存时间不超过1小时，使用缓存内容
+      if (hoursDiff < 1) {
+        console.log('使用缓存的讲义内容');
+        markdownContent.value = cachedContent;
+        isLoading.value = false;
+        return;
+      }
+    }
+    
+    // 调用API获取最新内容
     const response = await getCourseMaterial(courseId);
     console.log('获取讲义接口返回:', response);
+    
     let content = '';
     if (response?.data && typeof response.data === 'object') {
       content = response.data.content || '';
     } else if (response?.content) {
       content = response.content;
+    } else if (typeof response === 'string') {
+      content = response;
     }
-    if (!content) {
-      content = '';
-      // content = '课程讲义\n\n这是课程讲义的默认内容。...';
+    
+    // 如果API返回空内容，使用缓存内容（如果有的话）
+    if (!content && cachedContent) {
+      console.log('API返回空内容，使用缓存内容');
+      content = cachedContent;
     }
+    
+    // 设置内容
     markdownContent.value = content;
     console.log('fetch后markdownContent:', markdownContent.value);
-    if (markdownEditor.value && markdownEditor.value.setMarkdown) {
-      markdownEditor.value.setMarkdown(markdownContent.value);
-      if (markdownEditor.value.getMarkdown) {
-        console.log('fetch后编辑器内容:', markdownEditor.value.getMarkdown());
+    
+    // 更新内容状态
+    if (content && content.trim()) {
+      contentStatus.value = {
+        type: 'success',
+        icon: '📝',
+        message: `已加载讲义内容 (${content.length} 字符)`
+      };
+    } else {
+      contentStatus.value = {
+        type: 'info',
+        icon: '📄',
+        message: '讲义内容为空，可以开始编写'
+      };
+    }
+    
+    // 更新编辑器内容
+    if (markdownRef.value && markdownRef.value.setMarkdown) {
+      markdownRef.value.setMarkdown(markdownContent.value);
+      if (markdownRef.value.getMarkdown) {
+        console.log('fetch后编辑器内容:', markdownRef.value.getMarkdown());
       }
     }
+    
+    // 缓存内容到localStorage
+    if (content) {
+      localStorage.setItem(`lecture_content_${courseId}`, content);
+      localStorage.setItem(`lecture_last_saved_${courseId}`, new Date().toISOString());
+    }
+    
   } catch (err) {
     console.error('获取课程讲义失败', err);
-    error.value = '获取课程讲义失败，请稍后重试';
+    error.value = err instanceof Error ? err.message : '获取课程讲义失败，请稍后重试';
+    
+    // 尝试使用缓存内容
+    const courseId = typeof props.courseId === 'string' ? parseInt(props.courseId, 10) : props.courseId;
+    const cachedContent = localStorage.getItem(`lecture_content_${courseId}`);
+    
+    if (cachedContent) {
+      console.log('API失败，使用缓存内容');
+      markdownContent.value = cachedContent;
+    }
+    
+    // 显示错误消息
+    setTimeout(() => {
+      error.value = '';
+    }, 5000);
   } finally {
     isLoading.value = false;
   }
@@ -377,11 +706,26 @@ const scrollToHeading = (anchor: string) => {
   }
 };
 
+// 滚动到指定章节
+const scrollToChapter = (chapterTitle: string) => {
+  activeHeading.value = chapterTitle;
+  const chapter = chapters.value.find(c => c.title === chapterTitle);
+  if (chapter) {
+    const anchor = chapter.title.toLowerCase().replace(/\s+/g, '-');
+    scrollToHeading(anchor);
+  }
+};
+
 // 保存讲义
 const handleSave = async () => {
-  if (!markdownContent.value.trim() || !props.courseId) return;
+  // 允许保存空内容，但需要有效的课程ID
+  if (!props.courseId) {
+    error.value = '无效的课程ID，无法保存';
+    return;
+  }
   
   isSaving.value = true;
+  error.value = ''; // 清除之前的错误
   
   try {
     // 确保courseId是数字类型
@@ -390,17 +734,40 @@ const handleSave = async () => {
       throw new Error('无效的课程ID');
     }
     
+    // 获取当前内容（可能为空）
+    const contentToSave = markdownContent.value || '';
+    console.log('准备保存讲义内容:', { courseId, contentLength: contentToSave.length, content: contentToSave });
+    
     // 调用保存API
-    await saveCourseMaterial(courseId, markdownContent.value);
-    console.log('保存讲义内容成功:', markdownContent.value);
+    await saveCourseMaterial(courseId, contentToSave);
+    console.log('保存讲义内容成功:', contentToSave);
+    
+    // 显示成功消息
     showSuccessMessage.value = true;
     successMessage.value = '保存成功！';
     setTimeout(() => {
       showSuccessMessage.value = false;
     }, 3000);
+    
+    // 更新内容状态
+    contentStatus.value = {
+      type: 'success',
+      icon: '💾',
+      message: `讲义已保存 (${contentToSave.length} 字符) - ${new Date().toLocaleTimeString()}`
+    };
+    
+    // 保存成功后，更新本地状态
+    localStorage.setItem(`lecture_content_${courseId}`, contentToSave);
+    localStorage.setItem(`lecture_last_saved_${courseId}`, new Date().toISOString());
+    
   } catch (err) {
     console.error('保存讲义失败', err);
-    error.value = '保存讲义失败，请稍后重试';
+    error.value = err instanceof Error ? err.message : '保存讲义失败，请稍后重试';
+    
+    // 显示错误消息
+    setTimeout(() => {
+      error.value = '';
+    }, 5000);
   } finally {
     isSaving.value = false;
   }
@@ -465,17 +832,55 @@ const openAIOptimize = () => {
   openPrompt(selectedText.value);
 };
 
+const handleGenerateLectureFromEditor = async () => {
+  console.log('从编辑器切换到讲义查看模式');
+  showEditor.value = false; // 切换到讲义查看模式
+  await loadMergedLectureContent(); // 加载合并的讲义内容
+};
+
 onMounted(() => {
   updateEditorHeight();
   window.addEventListener('resize', updateEditorHeight);
+  
   console.log('TeachingLecture组件挂载，courseId:', props.courseId);
-  fetchCourseMaterial(); // 加载讲义内容
-  document.addEventListener('selectionchange', handleSelectionChange); // Add selection change listener
-});
-
-onUnmounted(() => {
-  window.removeEventListener('resize', updateEditorHeight);
-  document.removeEventListener('selectionchange', handleSelectionChange); // Remove selection change listener
+  
+  // 检查课程ID是否有效
+  if (!props.courseId || props.courseId <= 0) {
+    console.error('TeachingLecture组件挂载失败：无效的课程ID:', props.courseId);
+    error.value = '无效的课程ID，请返回课程管理页面重新选择课程';
+    return;
+  }
+  
+  // 如果不是编辑器模式，加载合并的讲义内容
+  if (!showEditor.value) {
+    console.log('非编辑器模式，加载合并的讲义内容');
+    loadMergedLectureContent();
+  } else {
+    // 如果是编辑器模式，加载讲义内容
+    console.log('编辑器模式，加载讲义内容');
+    fetchCourseMaterial();
+  }
+  
+  // 添加选择变化监听器
+  document.addEventListener('selectionchange', handleSelectionChange);
+  
+  // 设置定时自动保存（每5分钟）
+  const autoSaveInterval = setInterval(() => {
+    if (markdownContent.value && markdownContent.value.trim()) {
+      console.log('自动保存讲义内容...');
+      handleSave();
+    }
+  }, 5 * 60 * 1000);
+  
+  // 清理定时器
+  const cleanup = () => {
+    clearInterval(autoSaveInterval);
+    window.removeEventListener('resize', updateEditorHeight);
+    document.removeEventListener('selectionchange', handleSelectionChange);
+  };
+  
+  // 在组件卸载时清理
+  onUnmounted(cleanup);
 });
 </script>
 
@@ -798,5 +1203,173 @@ body {
 * {
   -ms-overflow-style: none;  /* IE and Edge */
   scrollbar-width: none;  /* Firefox */
+}
+
+/* New styles for auto-save indicator and content status */
+.auto-save-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: #e0f2f7;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  font-size: 14px;
+  color: #333;
+}
+
+.auto-save-icon {
+  font-size: 18px;
+}
+
+.content-status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  font-size: 14px;
+  color: #333;
+}
+
+.content-status-indicator.success {
+  background-color: #e8f5e9;
+  border: 1px solid #a5d6a7;
+}
+
+.content-status-indicator.error {
+  background-color: #ffebee;
+  border: 1px solid #ef9a9a;
+}
+
+.content-status-indicator.info {
+  background-color: #e3f2fd;
+  border: 1px solid #90caf9;
+}
+
+.status-icon {
+  font-size: 18px;
+}
+
+/* 目录样式 */
+.catalog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+.catalog-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.catalog-toggle-btn {
+  background: transparent;
+  border: 1px solid #ddd;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.catalog-toggle-btn:hover {
+  background-color: #f5f5f5;
+  border-color: #ccc;
+}
+
+.chapters-catalog {
+  padding: 10px;
+}
+
+.chapter-catalog-item {
+  padding: 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+}
+
+.chapter-catalog-item:hover {
+  background-color: rgba(227, 242, 253, 0.8);
+  border-color: rgba(33, 150, 243, 0.2);
+  transform: translateY(-1px);
+}
+
+.chapter-catalog-item.active {
+  background-color: rgba(227, 242, 253, 0.9);
+  border-color: rgba(33, 150, 243, 0.4);
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.1);
+}
+
+.chapter-catalog-title {
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.chapter-catalog-status {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.status-empty {
+  background-color: rgba(244, 67, 54, 0.1);
+  color: #f44336;
+}
+
+.status-draft {
+  background-color: rgba(251, 140, 0, 0.1);
+  color: #fb8c00;
+}
+
+.status-published {
+  background-color: rgba(76, 175, 80, 0.1);
+  color: #4caf50;
+}
+
+.catalog-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #666;
+}
+
+.catalog-empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.catalog-empty-text {
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.create-chapter-btn {
+  background-color: #2196f3;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.create-chapter-btn:hover {
+  background-color: #1976d2;
 }
 </style>

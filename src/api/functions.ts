@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { getToken } from './jwt';
-import type { CourseObjective, CourseSyllabus, CourseMaterial } from './types';
+import type { CourseObjective, CourseSyllabus, CourseMaterial, CourseObjectiveSaveRequest } from './types';
 
 const API_URL = 'http://localhost:8000';
 
@@ -23,10 +23,9 @@ export const getUserId = (): string => {
 // 创建一个通用的请求头生成函数
 const getAuthHeaders = () => {
   const token = getToken();
-  const userId = getUserId();
   return {
     'Authorization': `Bearer ${token}`,
-    'userId': userId
+    'Content-Type': 'application/json'
   };
 };
 
@@ -70,7 +69,7 @@ export const generateCourseObjective = async (courseId: number, prompt: string):
  * @param courseId 课程ID
  * @param objective 课程目标对象
  */
-export const saveCourseObjective = async (courseId: number, objective: CourseObjective): Promise<CourseObjective> => {
+export const saveCourseObjective = async (courseId: number, objective: CourseObjectiveSaveRequest): Promise<CourseObjective> => {
   try {
     const response = await axios.post(
       `${API_URL}/teacher/objective/${courseId}/save`,

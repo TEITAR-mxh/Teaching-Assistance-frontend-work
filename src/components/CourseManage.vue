@@ -8,6 +8,7 @@ interface Course {
   imageUrl?: string;
   isEditing?: boolean;
   isSelected?: boolean;
+  originalName?: string;
 }
 
 // 定义事件
@@ -24,6 +25,9 @@ const loading = ref(false);
 
 // 错误信息
 const errorMessage = ref('');
+
+// 名称更新过程中防抖标记，避免回车与失焦触发两次
+const isUpdatingName = ref(false);
 
 // 获取课程列表
 const fetchCourses = async () => {
@@ -76,6 +80,7 @@ const addNewCourse = async () => {
 // 编辑课程名称
 const editTitle = (course: Course) => {
   if (!isDeleteMode.value) {
+    course.originalName = course.name;
     course.isEditing = true;
   } else {
     toggleCourseSelection(course);
@@ -84,20 +89,44 @@ const editTitle = (course: Course) => {
 
 // 完成编辑
 const finishEdit = async (course: Course) => {
-  if (!course.name || course.name.trim() === '') {
+  if (isUpdatingName.value) return; // 防止重复提交
+  isUpdatingName.value = true;
+
+  const trimmed = (course.name || '').trim();
+  if (!trimmed) {
     errorMessage.value = '课程名称不能为空';
+    isUpdatingName.value = false;
     return;
   }
-  try {
-    // 调用更新课程名称的API
-    const updatedCourse = await updateCourseName(course.id, course.name);
-    // 更新本地数据
-    course.name = updatedCourse.name;
+
+  // 若名称未变化，直接退出编辑
+  if (trimmed === (course.originalName ?? course.name)) {
     course.isEditing = false;
+    isUpdatingName.value = false;
+    return;
+  }
+
+  try {
+    const updatedCourse = await updateCourseName(course.id, trimmed);
+    console.log('[前端] 更新课程名称成功，后端返回:', updatedCourse);
+    // 后端返回的是CourseResponse，字段是title，不是name
+    course.name = updatedCourse.title;
+    course.originalName = course.name;
+    course.isEditing = false;
+    console.log('[前端] 已更新本地课程名称为:', course.name);
   } catch (error) {
     console.error('更新课程名称失败:', error);
     errorMessage.value = '更新课程名称失败，请稍后重试';
+  } finally {
+    isUpdatingName.value = false;
   }
+};
+
+// 回车时仅触发失焦，让 @blur 统一处理，避免双触发
+const confirmByEnter = (event: KeyboardEvent) => {
+  event.preventDefault();
+  const target = event.target as HTMLInputElement | null;
+  target?.blur();
 };
 
 // 切换删除模式
@@ -122,15 +151,45 @@ const toggleCourseSelection = (course: Course) => {
 // 删除选中的课程
 const deleteSelectedCourses = async () => {
   const selectedCourses = courses.value.filter(course => course.isSelected);
+  
+  if (selectedCourses.length === 0) {
+    errorMessage.value = '请先选择要删除的课程';
+    return;
+  }
+  
+  console.log(`[前端] 准备删除 ${selectedCourses.length} 个课程:`, selectedCourses.map(c => c.id));
+  
   const deletePromises = selectedCourses.map(course => deleteCourse(course.id));
   
   try {
     await Promise.all(deletePromises);
     courses.value = courses.value.filter(course => !course.isSelected);
     isDeleteMode.value = false;
-  } catch (error) {
+    console.log('[前端] 删除成功，已更新课程列表');
+  } catch (error: any) {
     console.error('删除课程失败:', error);
-    errorMessage.value = '删除课程失败，请稍后重试';
+    let errorMsg = '删除课程失败，请稍后重试';
+    
+    if (error.response) {
+      switch (error.response.status) {
+        case 401:
+          errorMsg = '登录已过期，请重新登录';
+          break;
+        case 403:
+          errorMsg = '无权限删除此课程';
+          break;
+        case 404:
+          errorMsg = '课程不存在';
+          break;
+        case 500:
+          errorMsg = '服务器错误，请稍后重试';
+          break;
+        default:
+          errorMsg = `删除失败: ${error.response.data?.detail || error.message}`;
+      }
+    }
+    
+    errorMessage.value = errorMsg;
   }
 };
 
@@ -218,7 +277,7 @@ const vFocus = {
             type="text" 
             v-model="course.name" 
             @blur="finishEdit(course)"
-            @keyup.enter="finishEdit(course)"
+            @keyup.enter.prevent="confirmByEnter"
             @click.stop
             ref="titleInput"
             class="title-input"

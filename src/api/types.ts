@@ -27,6 +27,12 @@ export interface CourseObjective {
   updated_at: string;
 }
 
+// 新增：保存课程目标时使用的数据结构
+export interface CourseObjectiveSaveRequest {
+  course_content: string;
+  teaching_target: string;
+}
+
 export interface CourseSyllabus {
   id: number;
   course_id: number;
@@ -40,6 +46,42 @@ export interface CourseMaterial {
   course_id: number;
   content: string;
   created_at: string;
+  updated_at: string;
+}
+
+// 讲义相关类型
+export interface Chapter {
+  id: number;
+  course_id: number;
+  title: string;
+  content: string;
+  status: 'empty' | 'draft' | 'published';
+  order_index: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChapterCreate {
+  course_id: number;
+  title: string;
+  content?: string;
+  status?: string;
+  order_index?: number;
+}
+
+export interface ChapterUpdate {
+  title?: string;
+  content?: string;
+  status?: string;
+  order_index?: number;
+}
+
+export interface Lecture {
+  id: number;
+  course_id: number;
+  title: string;
+  content: string;
+  generated_at: string;
   updated_at: string;
 }
 

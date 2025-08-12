@@ -256,6 +256,8 @@ const handleSave = async () => {
   }
   try {
     isSaving.value = true;
+    
+    // 获取编辑器内容
     if (introductionMdRef.value) {
       const introContent = introductionMdRef.value.getMarkdown ? 
         introductionMdRef.value.getMarkdown() : courseIntroduction.value;
@@ -266,10 +268,17 @@ const handleSave = async () => {
         contentMdRef.value.getMarkdown() : courseContent.value;
       courseContent.value = teachingContent;
     }
+    
     const objectiveData = {
       course_content: courseIntroduction.value,
       teaching_target: courseContent.value
     };
+    
+    console.log('准备保存数据:', {
+      courseId: props.courseId,
+      objectiveData: objectiveData
+    });
+    
     await saveCourseObjective(props.courseId, objectiveData);
     successMessage.value = '保存成功';
     showSuccessMessage.value = true;
@@ -277,9 +286,27 @@ const handleSave = async () => {
       showSuccessMessage.value = false;
     }, 3000);
     await fetchCourseObjective();
-  } catch (error) {
+  } catch (error: any) {
     console.error('保存失败:', error);
-    successMessage.value = '保存失败，请稍后重试';
+    
+    // 增强错误信息显示
+    let errorMessage = '保存失败，请稍后重试';
+    if (error.response) {
+      console.error('错误响应:', error.response);
+      if (error.response.status === 401) {
+        errorMessage = '认证失败，请重新登录';
+      } else if (error.response.status === 400) {
+        errorMessage = '请求参数错误，请检查数据格式';
+      } else if (error.response.status === 500) {
+        errorMessage = '服务器内部错误，请稍后重试';
+      } else if (error.response.data && error.response.data.detail) {
+        errorMessage = `保存失败: ${error.response.data.detail}`;
+      }
+    } else if (error.message) {
+      errorMessage = `保存失败: ${error.message}`;
+    }
+    
+    successMessage.value = errorMessage;
     showSuccessMessage.value = true;
     setTimeout(() => {
       showSuccessMessage.value = false;

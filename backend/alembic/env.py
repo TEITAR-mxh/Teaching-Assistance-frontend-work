@@ -4,6 +4,7 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from alembic import context
+from urllib.parse import quote_plus
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -17,6 +18,18 @@ fileConfig(config.config_file_name)
 # for 'autogenerate' support
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from app.models import Base  # noqa
+from app.core.config import settings  # noqa
+
+# Build sync DB URL from app settings to avoid encoding issues
+# Use psycopg2 driver for Alembic (sync), percent-encode credentials
+sync_db_url = (
+    f"postgresql+psycopg2://{quote_plus(settings.POSTGRES_USER)}:"
+    f"{quote_plus(settings.POSTGRES_PASSWORD)}@{settings.POSTGRES_HOST}:"
+    f"{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
+)
+
+# Override sqlalchemy.url at runtime
+config.set_main_option("sqlalchemy.url", sync_db_url)
 
 target_metadata = Base.metadata
 

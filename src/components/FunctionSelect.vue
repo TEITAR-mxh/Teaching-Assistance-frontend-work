@@ -198,20 +198,20 @@ const showCourseInfo = () => {
 }
 
 // 显示模块内容
-const showModule = (moduleId: string) => {
-  console.log('FunctionSelect: showModule被调用，moduleId:', moduleId)
+const showModule = (moduleId: string, showEditor: boolean = false) => {
+  console.log('FunctionSelect: showModule被调用，moduleId:', moduleId, 'showEditor:', showEditor)
   if (moduleId === 'lecture') {
     console.log('FunctionSelect: 准备导航到TeachingLecture组件')
-    // 导航到TeachingLecture组件并设置showEditor为true
+    // 导航到TeachingLecture组件，根据参数设置showEditor
     emit('show-module', { 
       component: 'TeachingLecture', 
       props: {
         courseId: props.courseId,
         courseName: courseTitle.value,
-        showEditor: true  // 添加showEditor参数
+        showEditor: showEditor  // 使用传入的参数
       }
     });
-    console.log('FunctionSelect: TeachingLecture 导航事件已发出')
+    console.log('FunctionSelect: TeachingLecture 导航事件已发出，showEditor:', showEditor)
   } else {
     console.log('FunctionSelect: 发出普通模块切换事件')
     emit('show-module', moduleId);
@@ -269,7 +269,7 @@ const getModuleIcon = (iconName: string) => {
     <div class="modules-container">
       <template v-for="(module, index) in modules" :key="module.id">
         <!-- 模块 -->
-        <div class="module-card" @click="showModule(module.id)">
+        <div class="module-card" @click="module.id === 'lecture' ? showModule(module.id, true) : showModule(module.id)">
           <div class="status-icon" :class="`status-${module.status}`">
             <font-awesome-icon :icon="getStatusIcon(module.status)" />
           </div>

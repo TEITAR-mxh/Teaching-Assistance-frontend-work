@@ -36,7 +36,32 @@ const router = createRouter({
     {
       path: '/teaching-lecture',
       name: 'teaching-lecture',
-      component: () => import('../views/TeachingLectureView.vue')
+      component: () => import('../views/TeachingLectureView.vue'),
+      // 添加路由守卫，确保有必要的参数
+      beforeEnter: (to, from, next) => {
+        // 检查是否有必要的查询参数
+        if (to.query.courseId && to.query.courseName) {
+          next()
+        } else {
+          // 如果没有参数，尝试从localStorage获取
+          const storedCourseId = localStorage.getItem('selectedCourseId')
+          const storedCourseTitle = localStorage.getItem('selectedCourseTitle')
+          
+          if (storedCourseId && storedCourseTitle) {
+            // 重定向到带有参数的URL
+            next({
+              path: '/teaching-lecture',
+              query: {
+                courseId: storedCourseId,
+                courseName: storedCourseTitle
+              }
+            })
+          } else {
+            // 如果都没有，重定向到首页
+            next('/')
+          }
+        }
+      }
     }
   ]
 })
